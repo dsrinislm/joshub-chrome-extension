@@ -1,6 +1,6 @@
 
 
-function textToADF(text) {
+export function textToADF(text) {
   const normalized = String(text ?? "")
     .replace(/\r\n/g, "\n")
     .trim();
@@ -158,4 +158,51 @@ export function insertUploadedImages(adfContent, byPlaceholder) {
     }
     return [node];
   });
+}
+
+export function adfToText(node) {
+  if (!node || typeof node !== "object") return "";
+  if (typeof node.text === "string") return node.text;
+  if (!Array.isArray(node.content)) return "";
+  const isBlock =
+    node.type === "doc" ||
+    node.type === "paragraph" ||
+    node.type === "heading" ||
+    node.type === "codeBlock" ||
+    node.type === "listItem";
+  return node.content
+    .map(adfToText)
+    .filter(Boolean)
+    .join(isBlock ? "\n" : "");
+}
+
+export function adfWithHardBreaks(node) {
+  if (Array.isArray(node)) {
+    return node.map(adfWithHardBreaks).flat();
+  }
+  if (!node || typeof node !== "object") return node;
+  if (
+    node.type === "text" &&
+    typeof node.text === "string" &&
+    node.text.includes("\n")
+  ) {
+    const parts = node.text.split("\n");
+    const fragments = [];
+    for (let i = 0; i < parts.length; i++) {
+      if (i > 0) fragments.push({ type: "hardBreak" });
+      if (parts[i].length > 0) fragments.push({ ...node, text: parts[i] });
+    }
+    return fragments;
+  }
+  if (Array.isArray(node.content)) {
+    const children = node.content.map(adfWithHardBreaks).flat();
+    while (children.length && children[0].type === "hardBreak") {
+      children.shift();
+    }
+    while (children.length && children[children.length - 1].type === "hardBreak") {
+      children.pop();
+    }
+    return { ...node, content: children };
+  }
+  return node;
 }

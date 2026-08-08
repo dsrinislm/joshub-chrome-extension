@@ -484,6 +484,9 @@ export async function runListingImport(site) {
             if (commentSync.added > 0) {
               statusHtml = `${statusHtml} — ${commentSync.added} comment(s) synced`;
             }
+            if (commentSync.error) {
+              statusHtml = `${statusHtml} — comment sync failed: ${escapeHtml(commentSync.error)}`;
+            }
           }
 
           if (flowSite === "Octane") {
@@ -594,7 +597,7 @@ export async function runListingImport(site) {
             setRowStatus(
               row,
               "created",
-              `<a href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(issue.key)}</a>${attachFailed ? ` — ${attachFailed} attachment(s) failed to upload${failedAttachmentNames(attachNames)}` : ""}${attachDescriptionError ? " — attachments uploaded, but inline image embed failed" : ""}${commentSync.added ? ` — ${commentSync.added} comment(s) synced` : ""}`,
+              `<a href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(issue.key)}</a>${attachFailed ? ` — ${attachFailed} attachment(s) failed to upload${failedAttachmentNames(attachNames)}` : ""}${attachDescriptionError ? " — attachments uploaded, but inline image embed failed" : ""}${commentSync.added ? ` — ${commentSync.added} comment(s) synced` : ""}${commentSync.error ? ` — comment sync failed: ${escapeHtml(commentSync.error)}` : ""}`,
             );
 
             scrollBulkRowTop(row);

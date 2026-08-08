@@ -464,6 +464,9 @@ export async function createTicket() {
       if (commentSync.added > 0) {
         finalStatus = `${finalStatus} ${commentSync.added} comment(s) synced.`;
       }
+      if (commentSync.error) {
+        finalStatus = `${finalStatus} Comment sync failed: ${commentSync.error}`;
+      }
 
       let backSyncText = "";
       const site = getSourceSite();

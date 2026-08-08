@@ -105,6 +105,26 @@ export function parseSheetRows(worksheet) {
   return { site: null, rows: [] };
 }
 
+export const EXCEL_STYLES = {
+  headerFont: {
+    name: "Arial",
+    size: 11,
+    bold: true,
+    color: { argb: "FFFFFFFF" },
+  },
+  headerFill: {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FF0097EF" },
+  },
+  linkFont: {
+    name: "Calibri",
+    size: 11,
+    underline: "single",
+    color: { argb: "FF0000FF" },
+  },
+};
+
 export function buildReport(workbook, rows) {
   const sheet = workbook.worksheets[0];
 
@@ -115,23 +135,7 @@ export function buildReport(workbook, rows) {
   sheet.spliceColumns(1, 0, []);
   sheet.getColumn(1).width = 18;
 
-  const headerFont = {
-    name: "Arial",
-    size: 11,
-    bold: true,
-    color: { argb: "FFFFFFFF" },
-  };
-  const headerFill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: "FF0097EF" },
-  };
-  const linkFont = {
-    name: "Calibri",
-    size: 11,
-    underline: "single",
-    color: { argb: "FF0000FF" },
-  };
+  const { headerFont, headerFill, linkFont } = EXCEL_STYLES;
 
   const lastCol = sheet.columnCount;
 

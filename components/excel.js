@@ -15,7 +15,7 @@ import {
   applyListingState,
 } from "./ui.js";
 import { validateBulkProjectKey } from "./validation.js";
-import { loadExcelJS, parseSheetRows, buildReport } from "./xlsx.js";
+import { loadExcelJS, parseSheetRows, buildReport, EXCEL_STYLES } from "./xlsx.js";
 import { detectTabState } from "./scrape.js";
 
 export function handleFileSelected() {
@@ -124,23 +124,7 @@ function buildOctaneReportWorkbook(ExcelJS, bulkRows) {
 
   const isSpark = String(bulkRows[0]?.site || "Octane") === "Spark";
 
-  const headerFont = {
-    name: "Arial",
-    size: 11,
-    bold: true,
-    color: { argb: "FFFFFFFF" },
-  };
-  const headerFill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: "FF0097EF" },
-  };
-  const linkFont = {
-    name: "Calibri",
-    size: 11,
-    underline: "single",
-    color: { argb: "FF0000FF" },
-  };
+  const { headerFont, headerFill, linkFont } = EXCEL_STYLES;
 
   sheet.columns = isSpark
     ? [

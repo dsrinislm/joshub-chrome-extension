@@ -1,5 +1,6 @@
 import { redirectToLogin, MAX_ATTACHMENT_UPLOAD_BYTES } from "./ui.js";
 import { sleep } from "./util.js";
+import { textToADF, adfToText } from "./adf.js";
 
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 
@@ -230,6 +231,15 @@ async function findExistingJiraIssueForUncached(
   return findExistingJiraIssue(jiraBaseUrl, projectKey, summary);
 }
 
+async function throwAuthOrSession(jiraBaseUrl, loginPath, messageIfSessionValid) {
+  const sessionValid = await isJiraLoggedIn(jiraBaseUrl);
+  if (sessionValid) {
+    throw new Error(messageIfSessionValid);
+  }
+  redirectToLogin(jiraBaseUrl, loginPath);
+  throw new Error("Jira session expired. Please login again.");
+}
+
 async function createJiraIssue(jiraBaseUrl, projectKey, summary, description) {
   const payload = {
     fields: {
@@ -256,14 +266,11 @@ async function createJiraIssue(jiraBaseUrl, projectKey, summary, description) {
   );
 
   if (response.status === 401 || response.status === 403) {
-    const sessionValid = await isJiraLoggedIn(jiraBaseUrl);
-
-    if (sessionValid) {
-      throw new Error("Invalid project key or you don't have access.");
-    }
-
-    redirectToLogin(jiraBaseUrl, projectKey);
-    throw new Error("Jira session expired. Please login again.");
+    await throwAuthOrSession(
+      jiraBaseUrl,
+      projectKey,
+      "Invalid project key or you don't have access.",
+    );
   }
 
   const responseData = await response.json();
@@ -425,35 +432,32 @@ async function updateJiraIssueDescription(jiraBaseUrl, issueKey, contentNodes) {
   throw new Error(`Attaching images failed (status ${response.status}).`);
 }
 
-async function listIssueAttachments(jiraBaseUrl, issueKey) {
+async function fetchIssueAttachments(jiraBaseUrl, issueKey) {
   const response = await jiraFetch(
     jiraBaseUrl,
     `/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=attachment`,
   );
-  if (!response.ok) throw new Error(`Couldn't list attachments (status ${response.status}).`);
+  if (!response.ok) {
+    throw new Error(`Couldn't list attachments (status ${response.status}).`);
+  }
   const data = await response.json();
-  const attachments = data?.fields?.attachment;
-  return Array.isArray(attachments) ? attachments.map((a) => a.filename) : [];
+  return Array.isArray(data?.fields?.attachment) ? data.fields.attachment : [];
 }
 
-async function listIssueAttachmentItems(jiraBaseUrl, issueKey) {
-  const response = await jiraFetch(
-    jiraBaseUrl,
-    `/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=attachment`,
-  );
-  if (!response.ok) throw new Error(`Couldn't list attachments (status ${response.status}).`);
-  const data = await response.json();
-  const attachments = data?.fields?.attachment;
-  return Array.isArray(attachments)
-    ? attachments
-        .map((a) => ({
-          name: String(a.filename || "").trim(),
-          id: String(a.id || "").trim(),
-          size: Number(a.size),
-          mimeType: String(a.mimeType || ""),
-        }))
-        .filter((a) => a.name && a.id)
-    : [];
+function mapAttachmentItems(attachments) {
+  return (Array.isArray(attachments) ? attachments : [])
+    .map((a) => ({
+      name: String(a.filename || "").trim(),
+      id: String(a.id || "").trim(),
+      size: Number(a.size),
+      mimeType: String(a.mimeType || ""),
+    }))
+    .filter((a) => a.name && a.id);
+}
+
+async function listIssueAttachments(jiraBaseUrl, issueKey) {
+  const attachments = await fetchIssueAttachments(jiraBaseUrl, issueKey);
+  return attachments.map((a) => a.filename);
 }
 
 async function fetchJiraAttachmentDataUrl(jiraBaseUrl, attachmentId, onProgress) {
@@ -491,33 +495,7 @@ async function fetchJiraAttachmentDataUrl(jiraBaseUrl, attachmentId, onProgress)
   });
 }
 
-function textToAdf(text) {
-  if (typeof text !== "string") text = String(text ?? "");
-  const lines = text.split("\n");
-  const content = lines.map((line) => ({
-    type: "paragraph",
-    content: line ? [{ type: "text", text: line }] : [],
-  }));
-  return { version: 1, type: "doc", content };
-}
-
-function adfToText(node) {
-  if (!node || typeof node !== "object") return "";
-  if (typeof node.text === "string") return node.text;
-  if (!Array.isArray(node.content)) return "";
-  const isBlock =
-    node.type === "doc" ||
-    node.type === "paragraph" ||
-    node.type === "heading" ||
-    node.type === "codeBlock" ||
-    node.type === "listItem";
-  return node.content
-    .map(adfToText)
-    .filter(Boolean)
-    .join(isBlock ? "\n" : "");
-}
-
-async function listJiraComments(jiraBaseUrl, issueKey) {
+async function fetchJiraComments(jiraBaseUrl, issueKey) {
   const response = await jiraFetch(
     jiraBaseUrl,
     `/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment?maxResults=5000`,
@@ -526,7 +504,11 @@ async function listJiraComments(jiraBaseUrl, issueKey) {
     throw new Error(`Couldn't list comments (status ${response.status}).`);
   }
   const data = await response.json();
-  const comments = Array.isArray(data?.comments) ? data.comments : [];
+  return Array.isArray(data?.comments) ? data.comments : [];
+}
+
+async function listJiraComments(jiraBaseUrl, issueKey) {
+  const comments = await fetchJiraComments(jiraBaseUrl, issueKey);
   return comments.map((c) => {
     if (typeof c?.body === "string") return c.body;
     if (c?.body && typeof c.body === "object") return adfToText(c.body).trim();
@@ -535,15 +517,7 @@ async function listJiraComments(jiraBaseUrl, issueKey) {
 }
 
 async function listJiraCommentsDetailed(jiraBaseUrl, issueKey) {
-  const response = await jiraFetch(
-    jiraBaseUrl,
-    `/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment?maxResults=5000`,
-  );
-  if (!response.ok) {
-    throw new Error(`Couldn't list comments (status ${response.status}).`);
-  }
-  const data = await response.json();
-  const comments = Array.isArray(data?.comments) ? data.comments : [];
+  const comments = await fetchJiraComments(jiraBaseUrl, issueKey);
   return comments
     .map((c) => ({
       id: String(c?.id || ""),
@@ -559,10 +533,10 @@ async function listJiraCommentsDetailed(jiraBaseUrl, issueKey) {
     .filter((c) => c.id && c.body);
 }
 
-async function getJiraIssue(jiraBaseUrl, issueKey) {
+async function fetchJiraIssue(jiraBaseUrl, issueKey, fields) {
   const response = await jiraFetch(
     jiraBaseUrl,
-    `/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=description,summary`,
+    `/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=${encodeURIComponent(fields)}`,
   );
   if (!response.ok) {
     throw new Error(`Couldn't fetch issue (status ${response.status}).`);
@@ -570,33 +544,24 @@ async function getJiraIssue(jiraBaseUrl, issueKey) {
   return response.json();
 }
 
+async function getJiraIssue(jiraBaseUrl, issueKey) {
+  return fetchJiraIssue(jiraBaseUrl, issueKey, "description,summary");
+}
+
 async function getJiraIssueWithAttachments(jiraBaseUrl, issueKey) {
-  const response = await jiraFetch(
+  const data = await fetchJiraIssue(
     jiraBaseUrl,
-    `/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=description,summary,attachment`,
+    issueKey,
+    "description,summary,attachment",
   );
-  if (!response.ok) {
-    throw new Error(`Couldn't fetch issue (status ${response.status}).`);
-  }
-  const data = await response.json();
-  const attachments = Array.isArray(data?.fields?.attachment)
-    ? data.fields.attachment
-        .map((a) => ({
-          name: String(a.filename || "").trim(),
-          id: String(a.id || "").trim(),
-          size: Number(a.size),
-          mimeType: String(a.mimeType || ""),
-        }))
-        .filter((a) => a.name && a.id)
-    : [];
-  return { issue: data, attachments };
+  return { issue: data, attachments: mapAttachmentItems(data?.fields?.attachment) };
 }
 
 async function addJiraComment(jiraBaseUrl, issueKey, body) {
   const payload =
     body && typeof body === "object" && body.type === "doc"
       ? body
-      : textToAdf(body);
+      : textToADF(body);
   const response = await jiraFetch(
     jiraBaseUrl,
     `/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment`,
@@ -612,12 +577,11 @@ async function addJiraComment(jiraBaseUrl, issueKey, body) {
   );
 
   if (response.status === 401 || response.status === 403) {
-    const sessionValid = await isJiraLoggedIn(jiraBaseUrl);
-    if (sessionValid) {
-      throw new Error("Invalid project key or you don't have access.");
-    }
-    redirectToLogin(jiraBaseUrl, "");
-    throw new Error("Jira session expired. Please login again.");
+    await throwAuthOrSession(
+      jiraBaseUrl,
+      "",
+      "Invalid project key or you don't have access.",
+    );
   }
 
   const responseData = await response.json().catch(() => null);
@@ -643,7 +607,6 @@ export {
   uploadJiraAttachment,
   updateJiraIssueDescription,
   listIssueAttachments,
-  listIssueAttachmentItems,
   fetchJiraAttachmentDataUrl,
   listJiraComments,
   listJiraCommentsDetailed,

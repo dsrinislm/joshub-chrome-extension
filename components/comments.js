@@ -1,8 +1,6 @@
 import { listJiraComments, addJiraComment } from "./api.js";
-import {
-  isEntryFromJira,
-  isEntryFromJiraOctane,
-} from "./comment-map.js";
+import { isEntryFromJira, isEntryFromJiraOctane } from "./comment-map.js";
+import { adfWithHardBreaks, textToADF } from "./adf.js";
 
 export function sparkCommentHeader(entry) {
   const kind = entry?.kind === "work_notes" ? "work note" : "comment";
@@ -12,57 +10,6 @@ export function sparkCommentHeader(entry) {
 export function sparkCommentBody(entry) {
   const header = sparkCommentHeader(entry);
   return entry.text ? `${header}\n\n${entry.text}` : header;
-}
-
-export async function syncSparkComments(
-  jiraOrigin,
-  issueKey,
-  entries,
-  sparkSysId,
-  existingBodies,
-) {
-  if (!jiraOrigin || !issueKey || !entries?.length) {
-    return { added: 0, total: 0 };
-  }
-  try {
-    const existing =
-      existingBodies || (await listJiraComments(jiraOrigin, issueKey));
-    const known = new Set(
-      existing
-        .map((body) => String(body || "").split("\n")[0].trim())
-        .filter(Boolean),
-    );
-    const knownBodies = new Set(
-      existing.map((body) => String(body || "").trim()).filter(Boolean),
-    );
-    let added = 0;
-    for (const entry of entries) {
-      const text = String(entry.text || "").trim();
-      if (/^\[Jira comment\]/i.test(text)) {
-        continue;
-      }
-      if (knownBodies.has(text)) {
-        continue;
-      }
-      if (
-        sparkSysId &&
-        entry.sysId &&
-        (await isEntryFromJira(sparkSysId, entry.sysId))
-      ) {
-        continue;
-      }
-      const header = sparkCommentHeader(entry);
-      if (known.has(header)) {
-        continue;
-      }
-      await addJiraComment(jiraOrigin, issueKey, sparkCommentBody(entry));
-      known.add(header);
-      added++;
-    }
-    return { added, total: entries.length };
-  } catch {
-    return { added: 0, total: entries.length };
-  }
 }
 
 export function octaneCommentHeader(entry) {
@@ -84,30 +31,27 @@ export function octaneCommentAdf(entry) {
     try {
       const converted = htmlToADF(html);
       if (Array.isArray(converted?.content) && converted.content.length) {
-        content.push(...converted.content);
+        content.push(...adfWithHardBreaks(converted.content));
         return { version: 1, type: "doc", content };
       }
     } catch {}
   }
   const text = String(entry.text || "").trim();
-  if (text) {
-    for (const line of text.split("\n")) {
-      content.push({
-        type: "paragraph",
-        content: line ? [{ type: "text", text: line }] : [],
-      });
-    }
-  }
+  if (text) content.push(...textToADF(text).content);
   return { version: 1, type: "doc", content };
 }
 
-export async function syncOctaneComments(
+async function syncCommentsToJira({
   jiraOrigin,
   issueKey,
   entries,
-  workItemId,
+  sourceId,
   existingBodies,
-) {
+  skipPrefix,
+  headerFor,
+  bodyFor,
+  isFromJira,
+}) {
   if (!jiraOrigin || !issueKey || !entries?.length) {
     return { added: 0, total: 0 };
   }
@@ -123,33 +67,77 @@ export async function syncOctaneComments(
       existing.map((body) => String(body || "").trim()).filter(Boolean),
     );
     let added = 0;
+    const errors = [];
     for (const entry of entries) {
       const text = String(entry.text || "").trim();
-      if (/^\[Jira comment\]/i.test(text)) {
+      if (skipPrefix.test(text)) continue;
+      if (knownBodies.has(text)) continue;
+      const entryId = entry.id || entry.sysId;
+      if (sourceId && entryId && (await isFromJira(sourceId, entryId))) {
         continue;
       }
-      if (knownBodies.has(text)) {
-        continue;
+      const header = headerFor(entry);
+      if (known.has(header)) continue;
+      try {
+        await addJiraComment(jiraOrigin, issueKey, bodyFor(entry));
+        known.add(header);
+        added++;
+      } catch (error) {
+        errors.push(String(error?.message || error));
       }
-      if (
-        workItemId &&
-        entry.id &&
-        (await isEntryFromJiraOctane(workItemId, entry.id))
-      ) {
-        continue;
-      }
-      const header = octaneCommentHeader(entry);
-      if (known.has(header)) {
-        continue;
-      }
-      await addJiraComment(jiraOrigin, issueKey, octaneCommentAdf(entry));
-      known.add(header);
-      added++;
     }
-    return { added, total: entries.length };
-  } catch {
-    return { added: 0, total: entries.length };
+    return {
+      added,
+      total: entries.length,
+      ...(errors.length ? { error: errors[0] } : {}),
+    };
+  } catch (error) {
+    return {
+      added: 0,
+      total: entries.length,
+      error: String(error?.message || error),
+    };
   }
+}
+
+export async function syncSparkComments(
+  jiraOrigin,
+  issueKey,
+  entries,
+  sparkSysId,
+  existingBodies,
+) {
+  return syncCommentsToJira({
+    jiraOrigin,
+    issueKey,
+    entries,
+    sourceId: sparkSysId,
+    existingBodies,
+    skipPrefix: /^\[Jira comment\]/i,
+    headerFor: sparkCommentHeader,
+    bodyFor: sparkCommentBody,
+    isFromJira: isEntryFromJira,
+  });
+}
+
+export async function syncOctaneComments(
+  jiraOrigin,
+  issueKey,
+  entries,
+  workItemId,
+  existingBodies,
+) {
+  return syncCommentsToJira({
+    jiraOrigin,
+    issueKey,
+    entries,
+    sourceId: workItemId,
+    existingBodies,
+    skipPrefix: /^\[Jira comment\]/i,
+    headerFor: octaneCommentHeader,
+    bodyFor: octaneCommentAdf,
+    isFromJira: isEntryFromJiraOctane,
+  });
 }
 
 export async function syncSourceComments(
