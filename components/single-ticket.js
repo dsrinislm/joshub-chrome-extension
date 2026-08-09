@@ -91,6 +91,7 @@ async function syncSourceCommentsForTicket(jiraOrigin, issueKey, pageData, exist
   if (site === "Octane") {
     const idMatch =
       /entityType=work_item&id=(\d+)/.exec(pageData.url || "") ||
+      /[?&]id=(\d+)/.exec(pageData.url.split("#")[1] || "") ||
       /[?&]id=(\d+)/.exec(pageData.url.split("#")[0] || "");
     if (!idMatch) return { added: 0, total: 0 };
     const groups = await fetchOctaneCommentsInTab([idMatch[1]]).catch(() => {
@@ -440,9 +441,13 @@ export async function createTicket() {
                   .filter((n) => !failedSet.has(n)),
               );
             }
-          } catch {
+          } catch (err) {
             const target = site === "Octane" ? "Octane" : "Spark";
-            finalStatus = `${finalStatus} Couldn't sync Jira attachments to ${target}.`;
+            console.error(`Couldn't sync Jira attachments to ${target}:`, err);
+            const reason =
+              (err && err.message) || String(err || "unknown error");
+            finalStatus = `${finalStatus} Couldn't sync Jira attachments to ${target}: ${reason}`;
+            finalStatusType = "error";
           }
         }
       }

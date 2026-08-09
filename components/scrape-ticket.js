@@ -167,7 +167,7 @@ export async function scrapeInPage(site, options = {}) {
       title: `${site.name.toUpperCase()} | ${itemIdText} | ${String(data.name).replace(/\s+/g, " ").trim()}`,
       id: itemIdText,
       source: site.name,
-      url: location.href,
+      url: `${location.href.split("#")[0]}#/entity-navigation?entityType=work_item&id=${itemIdText}`,
       html,
       text,
       images,

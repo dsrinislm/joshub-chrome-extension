@@ -509,7 +509,12 @@ export async function runListingImport(site) {
                     statusHtml = `${statusHtml} — ${octaneBack.failed} Jira attachment(s) failed to sync to Octane${failedAttachmentNames(octaneBack.failedNames)}`;
                   }
                 }
-              } catch {}
+              } catch (err) {
+                console.error(
+                  "Couldn't sync Jira attachments to Octane:",
+                  err,
+                );
+              }
             }
             try {
               const back = await syncJiraCommentsToOctane({

@@ -114,12 +114,24 @@ import {
   syncJiraUpdates,
   getSyncAttachmentItems,
 } from "./components/jira-to-spark.js";
+import {
+  getSyncOctaneAttachmentItems,
+  syncOctaneUpdates,
+} from "./components/jira-to-octane.js";
 
 const debouncedSaveSettings = debounce(saveSettings, 300);
 
 let jiraFlowActive = false;
 let detectionLocked = false;
 let cachedJiraSyncData = null;
+
+function sourceSiteLabel(description) {
+  const url = extractSourceUrl(description || "");
+  return url &&
+    /entityType=work_item|shared_spaces|#\/entity-navigation/.test(url)
+    ? "Octane"
+    : "Spark";
+}
 
 loadInitialState();
 startGapArt();
@@ -224,16 +236,31 @@ async function runSyncUpdates() {
   detectionLocked = true;
   try {
     setStatus(`Syncing updates for ${issue.key}...`, "loading");
+    const flowSite = sourceSiteLabel(
+      cachedJiraSyncData?.issue?.fields?.description,
+    );
+    const isOctane = flowSite === "Octane";
+    const syncResult = isOctane
+      ? await syncOctaneUpdates({
+          jiraOrigin: ctx.jiraOrigin,
+          issueKey: issue.key,
+          includeAttachments: getIncludeAttachments(),
+          selectedAttachments: getIncludeAttachments()
+            ? getSelectedAttachments()
+            : null,
+          cachedJiraData: cachedJiraSyncData,
+        })
+      : await syncJiraUpdates({
+          jiraOrigin: ctx.jiraOrigin,
+          issueKey: issue.key,
+          includeAttachments: getIncludeAttachments(),
+          selectedAttachments: getIncludeAttachments()
+            ? getSelectedAttachments()
+            : null,
+          cachedJiraData: cachedJiraSyncData,
+        });
     const { report, sparkToJira, attachments, attachmentsToSpark, sourceUrl } =
-      await syncJiraUpdates({
-        jiraOrigin: ctx.jiraOrigin,
-        issueKey: issue.key,
-        includeAttachments: getIncludeAttachments(),
-        selectedAttachments: getIncludeAttachments()
-          ? getSelectedAttachments()
-          : null,
-        cachedJiraData: cachedJiraSyncData,
-      });
+      syncResult;
     if (cachedJiraSyncData && Array.isArray(attachmentsToSpark?.uploadedNames)) {
       cachedJiraSyncData.syncedNames = [
         ...new Set([
@@ -247,16 +274,16 @@ async function runSyncUpdates() {
       : "";
     const bits = [];
     if (report.posted > 0) {
-      bits.push(`${report.posted} Jira comment(s) synced to Spark`);
+      bits.push(`${report.posted} Jira comment(s) synced to ${flowSite}`);
     } else if (report.failed > 0) {
-      bits.push(`${report.failed} Jira comment(s) failed to sync to Spark`);
+      bits.push(`${report.failed} Jira comment(s) failed to sync to ${flowSite}`);
     } else {
-      bits.push("Jira comments up to date in Spark");
+      bits.push(`Jira comments up to date in ${flowSite}`);
     }
     if (sparkToJira?.added > 0) {
-      bits.push(`${sparkToJira.added} Spark comment(s) synced to Jira`);
+      bits.push(`${sparkToJira.added} ${flowSite} comment(s) synced to Jira`);
     } else {
-      bits.push("Spark comments up to date in Jira");
+      bits.push(`${flowSite} comments up to date in Jira`);
     }
     if (attachments?.uploaded > 0) {
       bits.push(`${attachments.uploaded} attachment(s) synced to Jira`);
@@ -266,14 +293,14 @@ async function runSyncUpdates() {
       bits.push("attachments up to date in Jira");
     }
     if (attachmentsToSpark?.uploaded > 0) {
-      bits.push(`${attachmentsToSpark.uploaded} attachment(s) synced to Spark`);
+      bits.push(`${attachmentsToSpark.uploaded} attachment(s) synced to ${flowSite}`);
     } else if (attachmentsToSpark?.failed > 0) {
       const names = (attachmentsToSpark.failedNames || []).join(", ");
       bits.push(
-        `${attachmentsToSpark.failed} attachment(s) failed to sync to Spark${names ? `: ${names}` : ""}`,
+        `${attachmentsToSpark.failed} attachment(s) failed to sync to ${flowSite}${names ? `: ${names}` : ""}`,
       );
     } else if (attachmentsToSpark?.skipped > 0) {
-      bits.push("attachments up to date in Spark");
+      bits.push(`attachments up to date in ${flowSite}`);
     }
     const failed =
       report.failed > 0 ||
@@ -353,12 +380,21 @@ includeAttachmentsInput.addEventListener("change", async () => {
         clearAttachmentPicker();
         return;
       }
-      const { items, syncedNames, loginRequired, sparkOrigin, issue: pickedIssue, attachments } =
-        await getSyncAttachmentItems({
-          jiraOrigin: ctx.jiraOrigin,
-          issueKey: issue.key,
-          cachedJiraData: cachedJiraSyncData,
-        });
+      const isOctane =
+        sourceSiteLabel(cachedJiraSyncData?.issue?.fields?.description) ===
+        "Octane";
+      const { items, syncedNames, loginRequired, sparkOrigin, issue: pickedIssue, attachments, note } =
+        isOctane
+          ? await getSyncOctaneAttachmentItems({
+              jiraOrigin: ctx.jiraOrigin,
+              issueKey: issue.key,
+              cachedJiraData: cachedJiraSyncData,
+            })
+          : await getSyncAttachmentItems({
+              jiraOrigin: ctx.jiraOrigin,
+              issueKey: issue.key,
+              cachedJiraData: cachedJiraSyncData,
+            });
       cachedJiraSyncData = { issue: pickedIssue, attachments, syncedNames };
       if (!getIncludeAttachments()) return;
       if (loginRequired) {
@@ -376,7 +412,7 @@ includeAttachmentsInput.addEventListener("change", async () => {
         return;
       }
       renderAttachmentPicker(items, syncedNames);
-      setAttachmentNote("");
+      setAttachmentNote(note || "");
       smoothScrollToBottom();
     } catch {
       setSyncedTicketFound(false);

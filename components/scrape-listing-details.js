@@ -395,8 +395,10 @@ export function fetchListingDetailsInPage(ids, site, options = {}) {
   })();
 }
 
-export async function fetchListingDetailsInTab(ids, site, options = {}) {
-  const currentTab = await getCurrentTab();
+export async function fetchListingDetailsInTab(ids, site, options = {}, tabId) {
+  const currentTab = tabId
+    ? { id: tabId }
+    : await getCurrentTab();
 
   const results = await chrome.scripting.executeScript({
     target: { tabId: currentTab.id, allFrames: true },

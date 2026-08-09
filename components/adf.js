@@ -125,14 +125,20 @@ export function dataUrlToBlob(dataUrl) {
   return new Blob([bytes], { type: mime });
 }
 
-export function fileMediaNode(attachment) {
+export function fileMediaNode(attachment, jiraOrigin = "") {
+  const id = String(attachment?.id || "").trim();
+  const url =
+    String(attachment?.content || "").trim() ||
+    (jiraOrigin && id
+      ? `${jiraOrigin}/rest/api/3/attachment/content/${id}`
+      : "");
   return {
     type: "mediaSingle",
     attrs: { layout: "center" },
     content: [
       {
         type: "media",
-        attrs: { type: "file", id: attachment.id, collection: "" },
+        attrs: { type: "external", url },
       },
     ],
   };

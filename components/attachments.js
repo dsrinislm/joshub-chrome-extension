@@ -99,7 +99,7 @@ export async function uploadImages(jiraOrigin, issueKey, images, onProgress, onF
             xhr.addEventListener("loadend", () => activeXhrs.delete(xhr));
           },
         );
-        byPlaceholder[img.placeholder] = fileMediaNode(attachment);
+        byPlaceholder[img.placeholder] = fileMediaNode(attachment, jiraOrigin);
         uploadedFiles++;
         reportFiles();
       } catch (err) {

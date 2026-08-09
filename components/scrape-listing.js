@@ -105,8 +105,10 @@ export async function listListingAttachmentsInPage(ids, siteName) {
   );
 }
 
-export async function listListingAttachmentsInTab(ids, siteName) {
-  const currentTab = await getCurrentTab();
+export async function listListingAttachmentsInTab(ids, siteName, tabId) {
+  const currentTab = tabId
+    ? { id: tabId }
+    : await getCurrentTab();
 
   const results = await chrome.scripting.executeScript({
     target: { tabId: currentTab.id, allFrames: true },
@@ -172,6 +174,8 @@ export function scrapeSelectedListingInPage() {
 
     if (!id || !href) return;
 
+    const entityMatch = /entityType=([^&]+)/.exec(href);
+    const entityType = entityMatch ? entityMatch[1] : "work_item";
     const nameEl = row.querySelector('div[field-name="name"] .grid-cell-text');
     const descEl = row.querySelector('div[field-name="description"]');
     const text = (el) =>
@@ -181,7 +185,7 @@ export function scrapeSelectedListingInPage() {
       id,
       name: text(nameEl),
       description: text(descEl),
-      url: location.href.split("#")[0] + href,
+      url: `${location.href.split("#")[0]}#/entity-navigation?entityType=${entityType}&id=${id}`,
     });
   });
 
@@ -243,14 +247,22 @@ function detectTabStateInPage(sites) {
     }
   }
 
+  const octane = sites.find((s) => s.name === "Octane");
   if (!site && /[?&]p=[^&#/]+\/[^&#]+/.test(location.search || "")) {
     site = "Octane";
   }
 
+  const octaneDetailOpen =
+    site === "Octane" && !!octane && matches(octane.idSelector);
+
   let listing = null;
-  if (matches("div.slick-row") && matches("a.alm-entity-grid-id-column")) {
+  if (
+    !octaneDetailOpen &&
+    matches("div.slick-row") &&
+    matches("a.alm-entity-grid-id-column")
+  ) {
     listing = "Octane";
-  } else {
+  } else if (!octaneDetailOpen) {
     const formlink = document.querySelector("a.linked.formlink");
     if (
       matches("tr.list_row") &&
@@ -276,7 +288,7 @@ function detectTabStateInPage(sites) {
     });
   }
 
-  return { site, listing, selectedCount };
+  return { site, listing, selectedCount, detail: octaneDetailOpen };
 }
 
 export async function detectTabState() {
@@ -294,12 +306,15 @@ export async function detectTabState() {
     });
 
     const site = results.map((r) => r.result?.site).find(Boolean) || null;
+    const detailFrame = results
+      .map((r) => r.result)
+      .find((r) => r && r.detail);
     const found =
       results.map((r) => r.result).find((r) => r && r.listing) || null;
     return {
       site,
-      listing: found ? found.listing : null,
-      selectedCount: found ? found.selectedCount || 0 : 0,
+      listing: detailFrame ? null : found ? found.listing : null,
+      selectedCount: detailFrame ? 0 : found ? found.selectedCount || 0 : 0,
     };
   } catch {
     return { site: null, listing: null };
