@@ -22,6 +22,14 @@ export function fetchListingDetailsInPage(ids, site, options = {}) {
     }
 
     const doc = new DOMParser().parseFromString(String(html), "text/html");
+
+    if (!includeAttachments) {
+      for (const imgEl of Array.from(doc.querySelectorAll("img"))) {
+        imgEl.remove();
+      }
+      return { html: doc.body ? doc.body.innerHTML : "", images };
+    }
+
     let next = 0;
 
     for (const imgEl of Array.from(doc.querySelectorAll("img"))) {

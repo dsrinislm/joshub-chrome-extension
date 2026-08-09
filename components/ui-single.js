@@ -287,7 +287,6 @@ export function updateAttachmentIncludeSyncState() {
   const allSynced =
     attachmentPickerHasNoAttachments ||
     (total > 0 && boxes.length === 0);
-  includeAttachmentsInput.disabled = allSynced;
 
   const fullySyncedTicket = syncedTicketFound && allSynced && ticketCardShown;
   const buttonGroup = createTicketBtn?.closest(".button-group");

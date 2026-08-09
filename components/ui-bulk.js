@@ -62,7 +62,10 @@ export function setBulkAttachmentSectionVisible(visible) {
   if (!bulkAttachmentSection) return;
   bulkAttachmentSection.style.display = visible ? "block" : "none";
   if (!visible) {
-    if (bulkIncludeAttachments) bulkIncludeAttachments.checked = false;
+    if (bulkIncludeAttachments) {
+      bulkIncludeAttachments.checked = false;
+      bulkIncludeAttachments.indeterminate = false;
+    }
     clearBulkAttachmentPicker();
     setBulkPreviewCollapsed(false);
   }
@@ -129,6 +132,9 @@ export function clearBulkAttachmentPicker() {
   setBulkAttachmentNote("");
   setBulkAttachmentSyncProgress(false);
   if (bulkAttachmentSelectAll) bulkAttachmentSelectAll.checked = true;
+  if (bulkIncludeAttachments) {
+    bulkIncludeAttachments.indeterminate = false;
+  }
   state.bulkAttachmentSelection = null;
 }
 
