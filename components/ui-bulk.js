@@ -1,4 +1,4 @@
-import { formatBytes } from "./util.js";
+import { formatBytes, isSafeHttpUrl, sanitizeHtml } from "./util.js";
 import {
   bulkAttachmentGroups,
   bulkAttachmentNote,
@@ -776,7 +776,7 @@ export function reorderBulkRowsAfterImport() {
 
 export function setRowStatus(row, rowState, html) {
   row.statusEl.dataset.state = rowState;
-  row.statusEl.innerHTML = html;
+  row.statusEl.innerHTML = sanitizeHtml(html);
   updateSelectionCount();
 }
 function createClampedCell(text, className) {
@@ -838,7 +838,7 @@ function buildBulkRow(record, site = "Octane") {
 
   const idTd = document.createElement("td");
   idTd.className = "row-id";
-  if (record.sourceUrl) {
+  if (record.sourceUrl && isSafeHttpUrl(record.sourceUrl)) {
     const link = document.createElement("a");
     link.href = record.sourceUrl;
     link.title = record.sourceUrl;
@@ -849,6 +849,9 @@ function buildBulkRow(record, site = "Octane") {
       chrome.tabs.create({ url: record.sourceUrl });
     });
     idTd.appendChild(link);
+  } else if (record.sourceUrl) {
+
+    idTd.textContent = record.idText || record.sourceUrl;
   } else if (record.idText) {
 
     idTd.textContent = record.idText;

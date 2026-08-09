@@ -1,4 +1,4 @@
-import { formatBytes, escapeHtml } from "./util.js";
+import { formatBytes, escapeHtml, sanitizeHtml } from "./util.js";
 import {
   attachmentGroups,
   attachmentNote,
@@ -388,7 +388,7 @@ export function renderTicketCard(issueKey, issueUrl) {
   const safeKey = escapeHtml(issueKey);
   const safeUrl = escapeHtml(issueUrl);
 
-  ticketResult.innerHTML = `
+  ticketResult.innerHTML = sanitizeHtml(`
         <div class="ticket-card">
           <div class="ticket-key">
             <a id="jiraIssueLink" href="${safeUrl}" target="_blank" rel="noopener noreferrer">
@@ -401,7 +401,7 @@ export function renderTicketCard(issueKey, issueUrl) {
             </a>
           </div>
         </div>
-      `;
+      `);
 
   ["jiraIssueLink", "jiraUrlLink"].forEach((id) => {
     const link = document.getElementById(id);

@@ -202,11 +202,6 @@ export async function syncOctaneAttachmentsInOrigin({
   onFileState,
 }) {
   const ctx = parseOctaneSourceUrl(sourceUrl);
-  console.log("[octane-sync-back] ctx", {
-    octaneOrigin: ctx.octaneOrigin,
-    workItemId: ctx.workItemId,
-    sourceUrl,
-  });
   let existing = new Set();
   try {
     const groups = await listListingAttachmentsInTab(
@@ -216,7 +211,6 @@ export async function syncOctaneAttachmentsInOrigin({
     );
     existing = new Set((groups[0]?.attachments || []).map((a) => a.name));
   } catch {}
-  console.log("[octane-sync-back] existing on octane", Array.from(existing));
 
   const outcomes = new Array(files.length);
   let next = 0;
@@ -327,15 +321,6 @@ export async function syncOctaneAttachmentsInOrigin({
   await Promise.all(
     Array.from({ length: Math.min(3, files.length) }, worker),
   );
-  console.log("[octane-sync-back] summary", {
-    uploaded: uploadedCount,
-    uploadedNames,
-    failed: failedCount,
-    failedNames,
-    firstError,
-    skipped: files.length - uploadedCount - failedCount,
-    fileCount: files.length,
-  });
   return {
     uploaded: uploadedCount,
     uploadedNames,

@@ -28,7 +28,10 @@ export async function fetchOctaneCommentsInPage(ids) {
       const doc = new DOMParser().parseFromString(String(html), "text/html");
       doc.querySelectorAll("a[href]").forEach((a) => {
         try {
-          a.href = new URL(a.getAttribute("href"), location.href).href;
+          const resolved = new URL(a.getAttribute("href"), location.href);
+          if (resolved.protocol === "http:" || resolved.protocol === "https:") {
+            a.href = resolved.href;
+          }
         } catch {}
       });
       return doc.body ? doc.body.innerHTML : String(html);
@@ -43,7 +46,7 @@ export async function fetchOctaneCommentsInPage(ids) {
       const index = next++;
       const workItemId = idList[index];
       const comments = [];
-      if (apiBase) {
+      if (apiBase && /^\d+$/.test(String(workItemId))) {
         try {
           const query = `"owner_work_item EQ {id EQ ${workItemId}}"`;
           const response = await fetch(

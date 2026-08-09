@@ -463,7 +463,7 @@ export async function runListingImport(site) {
                 ).concat(syncedNames);
               }
               if (syncReport.failed > 0) {
-                statusHtml = `Already exists — ${existsLink} — ${syncReport.failed} attachment(s) failed to sync${failedAttachmentNames(syncReport.failedNames)}`;
+                statusHtml = `Already exists — ${existsLink} — ${syncReport.failed} attachment(s) failed to sync${escapeHtml(failedAttachmentNames(syncReport.failedNames))}`;
               } else if (syncReport.uploaded > 0) {
                 statusHtml = `Already exists — ${existsLink} — synced ${syncReport.uploaded} missing attachment(s)`;
               } else {
@@ -494,10 +494,6 @@ export async function runListingImport(site) {
           }
 
           if (flowSite === "Octane") {
-            console.log("[octane-sync-back] reached", {
-              include: getBulkIncludeAttachments(),
-              issue: existing.issue.key,
-            });
             if (getBulkIncludeAttachments()) {
               try {
                 const { attachments: jiraAttachments } =
@@ -505,7 +501,6 @@ export async function runListingImport(site) {
                     jiraOrigin,
                     existing.issue.key,
                   );
-                console.log("[octane-sync-back] jira attachments", jiraAttachments);
                 const selection = getBulkSelectedAttachments();
                 const selectedNames = selection
                   ? selection[String(items[index].id)]
@@ -541,7 +536,7 @@ export async function runListingImport(site) {
                   if (octaneBack.uploaded > 0) {
                     statusHtml = `${statusHtml} — ${octaneBack.uploaded} Jira attachment(s) synced to Octane`;
                   } else if (octaneBack.failed > 0) {
-                    statusHtml = `${statusHtml} — ${octaneBack.failed} Jira attachment(s) failed to sync to Octane${failedAttachmentNames(octaneBack.failedNames)}`;
+                    statusHtml = `${statusHtml} — ${octaneBack.failed} Jira attachment(s) failed to sync to Octane${escapeHtml(failedAttachmentNames(octaneBack.failedNames))}`;
                   }
                   if (octaneBack.uploadedNames?.length) {
                     uploadedAttachments[String(items[index].id)] = (
@@ -549,12 +544,7 @@ export async function runListingImport(site) {
                     ).concat(octaneBack.uploadedNames);
                   }
                 }
-              } catch (err) {
-                console.error(
-                  "Couldn't sync Jira attachments to Octane:",
-                  err,
-                );
-              }
+              } catch {}
             }
             try {
               const back = await syncJiraCommentsToOctane({
@@ -626,7 +616,7 @@ export async function runListingImport(site) {
                   if (sparkBack.uploaded > 0) {
                     statusHtml = `${statusHtml} — ${sparkBack.uploaded} Jira attachment(s) synced to Spark`;
                   } else if (sparkBack.failed > 0) {
-                    statusHtml = `${statusHtml} — ${sparkBack.failed} Jira attachment(s) failed to sync to Spark${failedAttachmentNames(sparkBack.failedNames)}`;
+                    statusHtml = `${statusHtml} — ${sparkBack.failed} Jira attachment(s) failed to sync to Spark${escapeHtml(failedAttachmentNames(sparkBack.failedNames))}`;
                   }
                   if (sparkBack.uploadedNames?.length) {
                     uploadedAttachments[String(items[index].id)] = (
@@ -634,12 +624,7 @@ export async function runListingImport(site) {
                     ).concat(sparkBack.uploadedNames);
                   }
                 }
-              } catch (err) {
-                console.error(
-                  "Couldn't sync Jira attachments to Spark:",
-                  err,
-                );
-              }
+              } catch {}
             }
           }
 
@@ -715,7 +700,7 @@ export async function runListingImport(site) {
             setRowStatus(
               row,
               "created",
-              `<a href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(issue.key)}</a>${attachFailed ? ` — ${attachFailed} attachment(s) failed to upload${failedAttachmentNames(attachNames)}` : ""}${attachDescriptionError ? " — attachments uploaded, but inline image embed failed" : ""}${commentSync.added ? ` — ${commentSync.added} comment(s) synced` : ""}${commentSync.error ? ` — comment sync failed: ${escapeHtml(commentSync.error)}` : ""}`,
+              `<a href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(issue.key)}</a>${attachFailed ? ` — ${attachFailed} attachment(s) failed to upload${escapeHtml(failedAttachmentNames(attachNames))}` : ""}${attachDescriptionError ? " — attachments uploaded, but inline image embed failed" : ""}${commentSync.added ? ` — ${commentSync.added} comment(s) synced` : ""}${commentSync.error ? ` — comment sync failed: ${escapeHtml(commentSync.error)}` : ""}`,
             );
 
             scrollBulkRowTop(row);

@@ -63,9 +63,7 @@ export async function listListingAttachmentsInPage(ids, siteName) {
             if (name) attachments.push(rowToItem(name, row?.size_bytes));
           }
         }
-      } catch {
-
-      }
+      } catch {}
       return attachments;
     };
   } else {
@@ -78,6 +76,7 @@ export async function listListingAttachmentsInPage(ids, siteName) {
 
     fetchGroup = async (id) => {
       const attachments = [];
+      if (!/^\d+$/.test(String(id))) return attachments;
       const query = `owner_work_item EQ {id EQ ${id}}`;
       const fields = "id,name,size,exists";
       try {
@@ -93,9 +92,7 @@ export async function listListingAttachmentsInPage(ids, siteName) {
             if (name) attachments.push(rowToItem(name, att?.size));
           }
         }
-      } catch {
-
-      }
+      } catch {}
       return attachments;
     };
   }
@@ -141,7 +138,6 @@ export async function scrapeTab(tabId, siteName, options = {}) {
       world: siteName === "Spark" ? "MAIN" : "ISOLATED",
     });
   } catch {
-
     return null;
   }
 

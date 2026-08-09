@@ -443,7 +443,6 @@ export async function createTicket() {
             }
           } catch (err) {
             const target = site === "Octane" ? "Octane" : "Spark";
-            console.error(`Couldn't sync Jira attachments to ${target}:`, err);
             const reason =
               (err && err.message) || String(err || "unknown error");
             finalStatus = `${finalStatus} Couldn't sync Jira attachments to ${target}: ${reason}`;

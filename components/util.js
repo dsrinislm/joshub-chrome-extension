@@ -33,3 +33,56 @@ const HTML_ESCAPES = {
 export function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
 }
+
+export function isSafeHttpUrl(value) {
+  if (typeof value !== "string" || !value.trim()) return false;
+  return /^https?:\/\//i.test(value.trim());
+}
+
+const UNSAFE_TAGS = new Set([
+  "script",
+  "style",
+  "iframe",
+  "object",
+  "embed",
+  "frame",
+  "frameset",
+  "link",
+  "meta",
+  "base",
+  "template",
+  "form",
+  "svg",
+  "math",
+]);
+
+export function sanitizeHtml(html) {
+  if (!html) return "";
+  const doc = new DOMParser().parseFromString(String(html), "text/html");
+
+  doc.querySelectorAll("*").forEach((el) => {
+    const tag = el.tagName.toLowerCase();
+
+    if (UNSAFE_TAGS.has(tag)) {
+      el.remove();
+      return;
+    }
+
+    Array.from(el.attributes).forEach((attr) => {
+      const name = attr.name.toLowerCase();
+
+      if (name.startsWith("on") || name === "style") {
+        el.removeAttribute(attr.name);
+        return;
+      }
+
+      if (name === "href" || name === "src") {
+        if (!isSafeHttpUrl(attr.value)) {
+          el.removeAttribute(attr.name);
+        }
+      }
+    });
+  });
+
+  return doc.body ? doc.body.innerHTML : String(html);
+}

@@ -32,11 +32,75 @@
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
 
+    sanitizeTree(doc.body);
+
     return {
       version: 1,
       type: "doc",
       content: parseChildren(doc.body),
     };
+  }
+
+  const UNSAFE_TAGS = new Set([
+    "script",
+    "style",
+    "iframe",
+    "object",
+    "embed",
+    "frame",
+    "frameset",
+    "link",
+    "meta",
+    "base",
+    "template",
+    "form",
+    "svg",
+    "math",
+  ]);
+
+  const DANGEROUS_SCHEME = /^(javascript|vbscript|data):/i;
+
+  const ABSOLUTE_HTTP = /^https?:\/\//i;
+
+  function unwrap(el) {
+    const parent = el.parentNode;
+    if (parent) {
+      while (el.firstChild) parent.insertBefore(el.firstChild, el);
+    }
+    el.remove();
+  }
+
+  function sanitizeTree(root) {
+    if (!root) return;
+
+    Array.from(root.querySelectorAll("*")).forEach((el) => {
+      const tag = el.tagName.toLowerCase();
+
+      if (UNSAFE_TAGS.has(tag)) {
+        el.remove();
+        return;
+      }
+
+      Array.from(el.attributes).forEach((attr) => {
+        const name = attr.name.toLowerCase();
+
+        if (name === "href") {
+          const value = (attr.value || "").trim();
+          if (!ABSOLUTE_HTTP.test(value) || DANGEROUS_SCHEME.test(value)) {
+            unwrap(el);
+            return;
+          }
+        }
+
+        if (name === "src" && DANGEROUS_SCHEME.test((attr.value || "").trim())) {
+          el.removeAttribute(attr.name);
+        }
+
+        if (name.startsWith("on") || name === "style") {
+          el.removeAttribute(attr.name);
+        }
+      });
+    });
   }
 
   function parseChildren(parent) {
