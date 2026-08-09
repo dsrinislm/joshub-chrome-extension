@@ -23,7 +23,6 @@ export default [
         FileReader: "readonly",
         DOMParser: "readonly",
         XMLSerializer: "readonly",
-        Blob: "readonly",
         TextEncoder: "readonly",
         TextDecoder: "readonly",
         FormData: "readonly",

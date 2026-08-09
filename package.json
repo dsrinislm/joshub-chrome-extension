@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "lint": "eslint components popup.js",
-    "lint:fix": "eslint components popup.js --fix"
+    "lint:fix": "eslint components popup.js --fix",
+    "lint:strip": "eslint components popup.js -c eslint.strip.config.js --fix"
   },
   "devDependencies": {
     "eslint": "^10.8.0"

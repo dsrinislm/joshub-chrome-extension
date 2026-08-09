@@ -52,7 +52,8 @@ export default [
                     node.expression?.type !== "CallExpression" ||
                     callee?.type !== "MemberExpression" ||
                     callee.object?.type !== "Identifier" ||
-                    callee.object.name !== "console"
+                    callee.object.name !== "console" ||
+                    callee.property?.name === "error"
                   ) {
                     return;
                   }
