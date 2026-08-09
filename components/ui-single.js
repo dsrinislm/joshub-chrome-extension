@@ -1,4 +1,4 @@
-import { formatBytes, escapeHtml, sanitizeHtml } from "./util.js";
+import { formatBytes, escapeHtml, sanitizeHtml, truncateTextToFit } from "./util.js";
 import {
   attachmentGroups,
   attachmentNote,
@@ -226,6 +226,8 @@ export function renderAttachmentPicker(items, syncedNames = new Set()) {
     attachmentGroups.appendChild(group);
   }
 
+  attachmentGroups.querySelectorAll(".attachment-item-name").forEach(truncateTextToFit);
+
   if (!anyFiles) {
     attachmentGroups.innerHTML =
       '<div class="attachment-group-title">No attachments found.</div>';
@@ -420,6 +422,13 @@ export function showLoginButton(url, label = "Log in to Jira") {
   const labelEl = btn.querySelector(".btn-label");
   if (labelEl) labelEl.textContent = label;
   btn.style.display = "block";
+  btn.focus();
+  btn.scrollIntoView({ block: "nearest" });
+  if (btn === loginBtn) {
+    createTicketBtn.closest(".button-group")?.classList.add("login-visible");
+  } else {
+    bulkView.classList.add("login-visible");
+  }
   btn.onclick = () => {
     chrome.tabs.create({ url });
   };
@@ -428,6 +437,8 @@ export function showLoginButton(url, label = "Log in to Jira") {
 export function hideLoginButtons() {
   loginBtn.style.display = "none";
   bulkLoginBtn.style.display = "none";
+  createTicketBtn.closest(".button-group")?.classList.remove("login-visible");
+  bulkView.classList.remove("login-visible");
 }
 
 export function redirectToLogin(jiraBaseUrl, projectKey) {

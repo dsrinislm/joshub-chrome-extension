@@ -122,23 +122,33 @@ function buildOctaneReportWorkbook(ExcelJS, bulkRows) {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Report");
 
-  const isSpark = String(bulkRows[0]?.site || "Octane") === "Spark";
+  const site = String(bulkRows[0]?.site || "Octane");
+  const isSpark = site === "Spark";
+  const isJira = site === "Jira";
 
   const { headerFont, headerFill, linkFont } = EXCEL_STYLES;
 
-  sheet.columns = isSpark
+  sheet.columns = isJira
     ? [
-        { header: "Status", width: 24 },
-        { header: "Number", width: 14 },
-        { header: "Short description", width: 40 },
-        { header: "Description", width: 50 },
-      ]
-    : [
-        { header: "Status", width: 24 },
+        { header: "Source", width: 16 },
         { header: "ID", width: 14 },
-        { header: "Name", width: 40 },
+        { header: "Title", width: 40 },
         { header: "Description", width: 50 },
-      ];
+        { header: "Status", width: 24 },
+      ]
+    : isSpark
+      ? [
+          { header: "Status", width: 24 },
+          { header: "Number", width: 14 },
+          { header: "Short description", width: 40 },
+          { header: "Description", width: 50 },
+        ]
+      : [
+          { header: "Status", width: 24 },
+          { header: "ID", width: 14 },
+          { header: "Name", width: 40 },
+          { header: "Description", width: 50 },
+        ];
 
   sheet.getRow(1).eachCell((cell) => {
     cell.font = headerFont;
@@ -147,6 +157,46 @@ function buildOctaneReportWorkbook(ExcelJS, bulkRows) {
 
   bulkRows.forEach((r, i) => {
     const row = sheet.getRow(i + 2);
+
+    if (isJira) {
+      const sourceCell = row.getCell(1);
+      if (r.sourceText && r.sourceUrl) {
+        sourceCell.value = {
+          text: r.sourceText,
+          hyperlink: r.sourceUrl,
+        };
+        sourceCell.font = linkFont;
+      } else {
+        sourceCell.value = r.sourceText || "";
+      }
+
+      const idCell = row.getCell(2);
+      if (r.idLink || r.sourceUrl) {
+        idCell.value = {
+          text: r.idText || r.idLink || r.sourceUrl,
+          hyperlink: r.idLink || r.sourceUrl,
+        };
+        idCell.font = linkFont;
+      } else {
+        idCell.value = r.idText || "";
+      }
+
+      row.getCell(3).value = r.name || "";
+      row.getCell(4).value = r.description || "";
+
+      const statusLink = r.statusEl.querySelector("a");
+      const statusCell = row.getCell(5);
+      if (statusLink) {
+        statusCell.value = {
+          text: statusLink.textContent.trim(),
+          hyperlink: statusLink.getAttribute("href"),
+        };
+        statusCell.font = linkFont;
+      } else {
+        statusCell.value = r.statusEl.textContent.trim().replace(/\s+/g, " ");
+      }
+      return;
+    }
 
     const statusLink = r.statusEl.querySelector("a");
     if (statusLink) {

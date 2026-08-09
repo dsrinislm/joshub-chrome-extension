@@ -10,7 +10,7 @@ import {
   uploadSparkAttachmentsInPage,
 } from "./scrape.js";
 import { useSparkTab } from "./spark-controller.js";
-import { formatBytes } from "./util.js";
+import { formatBytes, sleep } from "./util.js";
 
 export async function fetchSparkEntriesInOrigin({ sparkOrigin, sysId, tab }) {
   const run = async (activeTab) => {
@@ -85,8 +85,22 @@ async function fetchSparkAttachmentItemsInOrigin({ sparkOrigin, sysId, tab }) {
       )[0]?.[0]?.items || [];
     return { items, loginRequired };
   };
-  if (tab) return run(tab);
-  return useSparkTab({ sparkOrigin, sysId, requireTicket: false }, run);
+  const retry = async (activeTab) => {
+    let last = { items: [], loginRequired: false };
+    let attempts = 0;
+    while (attempts < 2 && !last.items.length) {
+      if (attempts > 0) await sleep(600);
+      try {
+        last = await run(activeTab);
+      } catch {
+        last = { items: [], loginRequired: false };
+      }
+      attempts++;
+    }
+    return last;
+  };
+  if (tab) return retry(tab);
+  return useSparkTab({ sparkOrigin, sysId, requireTicket: false }, retry);
 }
 
 export async function syncSparkAttachmentsInOrigin({ jiraOrigin, sparkOrigin, sysId, files, tab, onProgress, onFileProgress, onFileState, knownSparkNames }) {
@@ -278,7 +292,7 @@ export function parseSourceUrl(sourceUrl) {
   return { sparkOrigin, sysId };
 }
 
-export async function getSyncAttachmentItems({ jiraOrigin, issueKey, cachedJiraData }) {
+export async function getSyncAttachmentItems({ jiraOrigin, issueKey, cachedJiraData, sourceUrl }) {
   let issue;
   let attachments;
   const cachedMatches =
@@ -295,11 +309,11 @@ export async function getSyncAttachmentItems({ jiraOrigin, issueKey, cachedJiraD
       issueKey,
     ));
   }
-  const sourceUrl = extractSourceUrl(issue?.fields?.description);
-  if (!sourceUrl) {
+  const srcUrl = sourceUrl || extractSourceUrl(issue?.fields?.description);
+  if (!srcUrl) {
     return { items: [], syncedNames: new Set() };
   }
-  const { sparkOrigin, sysId } = parseSourceUrl(sourceUrl);
+  const { sparkOrigin, sysId } = parseSourceUrl(srcUrl);
   const { items: sparkItems, loginRequired } =
     await fetchSparkAttachmentItemsInOrigin({
       sparkOrigin,

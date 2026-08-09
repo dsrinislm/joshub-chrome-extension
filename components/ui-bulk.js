@@ -1,4 +1,10 @@
-import { formatBytes, isSafeHttpUrl, sanitizeHtml } from "./util.js";
+import {
+  formatBytes,
+  extractSourceNumberFromSummary,
+  isSafeHttpUrl,
+  sanitizeHtml,
+  truncateTextToFit,
+} from "./util.js";
 import {
   bulkAttachmentGroups,
   bulkAttachmentNote,
@@ -27,6 +33,7 @@ import {
   previewCollapseBtn,
   previewIdHeader,
   previewSection,
+  previewSourceHeader,
   previewTitle,
   progressSection,
   projectKeyInput,
@@ -171,12 +178,6 @@ export function renderBulkAttachmentPicker(groups, labels = {}, syncedMap = {}) 
     const block = document.createElement("div");
     block.className = "attachment-group";
 
-    const totalBytes = files.reduce(
-      (sum, f) => sum + (Number(f.sizeBytes) || 0),
-      0,
-    );
-    const totalSize = formatBytes(totalBytes);
-
     const title = document.createElement("div");
     title.className = "attachment-group-title";
     const groupCheckbox = document.createElement("input");
@@ -198,18 +199,28 @@ export function renderBulkAttachmentPicker(groups, labels = {}, syncedMap = {}) 
         .forEach((box) => {
           box.checked = groupCheckbox.checked;
         });
+      updateGroupCheck(ticketId);
+      updateGroupSizeLabel(ticketId);
       updateBulkAttachmentSelectAll();
       updateBulkIncludeSyncState();
     });
 
     const titleText = document.createElement("span");
-    titleText.textContent = `${labels[ticketId] || group.id} (${files.length})${totalSize && totalSize !== "0 B" ? ` · ${totalSize}` : ""}`;
+    titleText.textContent = buildGroupTitleText(
+      labels[ticketId] || group.id,
+      files,
+      selectable.map((f) => f.name),
+    );
     title.append(groupCheckbox, titleText);
     block.appendChild(title);
 
+    block._files = files;
+    block._titleText = titleText;
     block.dataset.title = labels[ticketId] || String(group.id);
     block.dataset.count = String(files.length);
-    block.dataset.size = totalSize;
+    block.dataset.size = formatBytes(
+      files.reduce((sum, f) => sum + (Number(f.sizeBytes) || 0), 0),
+    );
 
     for (const item of files) {
       const alreadySynced = item.source !== "jira" && synced.has(item.name);
@@ -232,6 +243,7 @@ export function renderBulkAttachmentPicker(groups, labels = {}, syncedMap = {}) 
           ? [...sel, item.name]
           : sel.filter((n) => n !== item.name);
         updateGroupCheck(ticketId);
+        updateGroupSizeLabel(ticketId);
         updateBulkAttachmentSelectAll();
         updateBulkIncludeSyncState();
       });
@@ -253,6 +265,10 @@ export function renderBulkAttachmentPicker(groups, labels = {}, syncedMap = {}) 
     bulkAttachmentGroups.appendChild(block);
     updateGroupCheck(ticketId);
   }
+
+  bulkAttachmentGroups
+    .querySelectorAll(".attachment-item-name")
+    .forEach(truncateTextToFit);
 
   if (!anyFiles) {
     bulkAttachmentGroups.innerHTML =
@@ -317,16 +333,52 @@ export function updateBulkIncludeSyncState() {
     (total > 0 && boxes.length === 0);
   if (allSynced) {
     bulkIncludeAttachments.checked = true;
-    if (activeListingSite !== "Octane") {
-      bulkIncludeAttachments.disabled = true;
-    } else {
-      bulkIncludeAttachments.disabled = false;
-    }
+    bulkIncludeAttachments.indeterminate = false;
+    bulkIncludeAttachments.disabled = false;
   } else {
     bulkIncludeAttachments.disabled = false;
   }
 
   updateListingControls();
+}
+
+function selectedBytesOf(files, names) {
+  const set = new Set(names || []);
+  return files.reduce(
+    (sum, f) => sum + (set.has(f.name) ? Number(f.sizeBytes) || 0 : 0),
+    0,
+  );
+}
+
+function buildGroupTitleText(label, files, selectedNames) {
+  const totalBytes = files.reduce(
+    (sum, f) => sum + (Number(f.sizeBytes) || 0),
+    0,
+  );
+  const totalSize = formatBytes(totalBytes);
+  if (!totalSize || totalSize === "0 B") {
+    return `${label} (${files.length})`;
+  }
+  const selBytes = selectedBytesOf(files, selectedNames);
+  const selSize = formatBytes(selBytes);
+  if (selBytes >= totalBytes) {
+    return `${label} (${files.length}) · ${totalSize}`;
+  }
+  return `${label} (${files.length}) · ${selSize} of ${totalSize}`;
+}
+
+function updateGroupSizeLabel(ticketId) {
+  const block = bulkAttachmentGroups.querySelector(
+    `.attachment-group-check[data-ticket="${ticketId}"]`,
+  )?.closest(".attachment-group");
+  const titleText = block?._titleText;
+  const files = block?._files;
+  if (!titleText || !files) return;
+  titleText.textContent = buildGroupTitleText(
+    block.dataset.title,
+    files,
+    state.bulkAttachmentSelection?.[ticketId],
+  );
 }
 
 function updateGroupCheck(ticketId) {
@@ -359,6 +411,12 @@ export function updateBulkGroupChecks() {
   bulkAttachmentGroups
     .querySelectorAll(".attachment-group-check")
     .forEach((groupCheck) => updateGroupCheck(groupCheck.dataset.ticket));
+}
+
+export function updateBulkGroupSizeLabels() {
+  bulkAttachmentGroups
+    .querySelectorAll(".attachment-group-check")
+    .forEach((groupCheck) => updateGroupSizeLabel(groupCheck.dataset.ticket));
 }
 
 export function markBulkAttachmentsSynced(uploadedMap) {
@@ -455,15 +513,23 @@ export function setBulkBusy(isBusy) {
   importBtn.dataset.loading = isBusy ? "true" : "false";
   fileInput.disabled = isBusy;
   listingImportBtn.disabled = isBusy;
-  if (isBusy) collapseAttachmentPickers();
+  listingImportBtn.dataset.loading = isBusy ? "true" : "false";
+  if (isBusy) {
+    collapseAttachmentPickers();
+  }
 
   previewCollapseBtn?.classList.toggle("hidden", isBusy);
   selectAllLabel?.classList.toggle("hidden", isBusy);
   if (!isBusy) {
+    updateListingControls();
     updateBulkSelectAllVisibility();
 
     updateBulkIncludeSyncState();
   }
+}
+
+export function isBulkBusy() {
+  return bulkBusy;
 }
 
 const viewScroll = { single: 0, bulk: 0 };
@@ -512,7 +578,7 @@ export function setSingleTabEnabled(enabled) {
   tabSingle.title = isEnabled
     ? ""
     : "Open a Spark or Octane ticket to use this.";
-  if (!isEnabled && bulkView.hidden) {
+  if (!isEnabled && bulkView.hidden && jiraFilterActive) {
     switchView("bulk", false);
   }
 }
@@ -526,11 +592,18 @@ export function updateBulkStatusMessage() {
   const jiraConfigured =
     jiraBaseUrlInput.value.trim() && projectKeyInput.value.trim();
   setStatus(
-    jiraConfigured
-      ? excelFlowActive || !activeListingSite || !listingHasSelection
-        ? "Upload Octane or Spark report"
-        : "All set - Sync selected listing to continue"
-      : "Configure Jira details and create a ticket.",
+    jiraFilterActive
+      ? !state.bulkRows.length
+        ? "Select the issues on the Jira page to sync"
+        : getBulkHasCheckedRows() ||
+            !state.bulkRows.some((r) => !r.checkbox.disabled)
+          ? "All set - Sync selected Jira listing"
+          : "Select the issues on the Jira page to sync"
+      : jiraConfigured
+        ? excelFlowActive || !activeListingSite || !listingHasSelection
+          ? "Upload Octane or Spark report"
+          : "All set - Sync selected listing to continue"
+        : "Configure Jira details and create a ticket.",
     "info",
   );
 }
@@ -546,6 +619,17 @@ export function getActiveListingSite() {
   return activeListingSite;
 }
 
+let jiraFilterActive = false;
+
+export function setJiraFilterActive(active) {
+  jiraFilterActive = Boolean(active);
+  updateListingControls();
+}
+
+export function isJiraFilterActive() {
+  return jiraFilterActive;
+}
+
 export function setListingHasSelection(hasSelection) {
   listingHasSelection = Boolean(hasSelection);
   updateListingControls();
@@ -553,6 +637,49 @@ export function setListingHasSelection(hasSelection) {
 
 export function getListingHasSelection() {
   return listingHasSelection;
+}
+
+export function getBulkHasCheckedRows() {
+  return state.bulkRows.some(
+    (r) => r.checkbox.checked && !r.checkbox.disabled,
+  );
+}
+
+export function syncListingControls() {
+  updateListingControls();
+}
+
+export function setBulkRowsUnselected() {
+  state.bulkRows.forEach((r) => {
+    if (!r.checkbox.disabled) r.checkbox.checked = false;
+  });
+  if (selectAllCheckbox) selectAllCheckbox.checked = false;
+  updateListingControls();
+  updateSelectionCount();
+}
+
+export function setBulkRowsSelected() {
+  state.bulkRows.forEach((r) => {
+    if (!r.checkbox.disabled) r.checkbox.checked = true;
+  });
+  if (selectAllCheckbox) selectAllCheckbox.checked = true;
+  updateListingControls();
+  updateSelectionCount();
+}
+
+export function autoCheckBulkRowsByKeys(keys) {
+  const keySet = new Set((keys || []).map((k) => String(k).toUpperCase()));
+  state.bulkRows.forEach((r) => {
+    if (r.checkbox.disabled) return;
+    r.checkbox.checked = keySet.has(String(r.idText).toUpperCase());
+  });
+  if (selectAllCheckbox) {
+    selectAllCheckbox.checked = state.bulkRows.some(
+      (r) => !r.checkbox.disabled && r.checkbox.checked,
+    );
+  }
+  updateListingControls();
+  updateSelectionCount();
 }
 
 let excelFlowActive = false;
@@ -571,6 +698,9 @@ function listingSyncDoneState() {
   const allRowsDone = state.bulkRows.every(
     (r) => r.checkbox.checked && r.checkbox.disabled,
   );
+  if (jiraFilterActive) {
+    return allRowsDone && exportBtn.style.display !== "none";
+  }
   return (
     allRowsDone &&
     Boolean(bulkIncludeAttachments?.checked && bulkIncludeAttachments.disabled) &&
@@ -580,12 +710,17 @@ function listingSyncDoneState() {
 
 function updateListingControls() {
   const show =
-    !excelFlowActive && Boolean(activeListingSite) && listingHasSelection;
+    !excelFlowActive &&
+    (jiraFilterActive
+      ? state.bulkRows.some((r) => r.checkbox.checked)
+      : Boolean(activeListingSite) && listingHasSelection);
   setBulkAttachmentSectionVisible(show);
   listingImportBtn.style.display =
     show && !listingSyncDoneState() ? "block" : "none";
   if (show && !listingSyncDoneState()) {
-    listingImportLabel.textContent = `Sync selected ${activeListingSite} listing`;
+    listingImportLabel.textContent = jiraFilterActive
+      ? "Sync selected Jira listing"
+      : `Sync selected ${activeListingSite} listing`;
   }
 }
 
@@ -703,9 +838,14 @@ export function updateSelectionCount() {
 
     if (selectable === 0) {
       lockBulkImport();
+      const allAlreadySynced = state.bulkRows.every((r) =>
+        (r.statusEl.textContent || "").includes("attachments up to date"),
+      );
       setStatus(
         bulkRowsFromListing
-          ? "Bulk import done! Select rows on the listing page to sync more"
+          ? allAlreadySynced
+            ? "Selected attachments are already synced — nothing to sync."
+            : "Bulk import done! Select rows on the listing page to sync more"
           : "Bulk import done! try different report",
         "success",
       );
@@ -713,9 +853,11 @@ export function updateSelectionCount() {
 
       unlockBulkImport();
       setStatus(
-        bulkRowsFromListing
-          ? "All set - Sync selected listing to continue"
-          : "All set - Export selected tickets into JIRA",
+        jiraFilterActive
+          ? "All set - Sync selected Jira listing"
+          : bulkRowsFromListing
+            ? "All set - Sync selected listing to continue"
+            : "All set - Export selected tickets into JIRA",
         "info",
       );
     } else {
@@ -726,7 +868,9 @@ export function updateSelectionCount() {
           ? bulkRowsFromListing
             ? "Select new items on the listing page to sync more"
             : "Select new items to continue create more"
-          : "Select the tickets to import.",
+          : jiraFilterActive
+            ? "Select the issues on the Jira page to sync."
+            : "Select the tickets to import.",
         "info",
       );
     }
@@ -740,6 +884,7 @@ export function toggleSelectAll() {
     if (!r.checkbox.disabled) r.checkbox.checked = selectAllCheckbox.checked;
   });
   updateSelectionCount();
+  updateListingControls();
 }
 
 const isBulkRowDone = (r) =>
@@ -828,6 +973,8 @@ function buildBulkRow(record, site = "Octane") {
   const title = record.title || titleParts.join(" | ");
 
   previewIdHeader.textContent = site === "Spark" ? "Number" : "ID";
+  const isJiraFlow = site === "Jira";
+  previewSourceHeader.classList.toggle("hidden", !isJiraFlow);
   const tr = document.createElement("tr");
 
   const checkTd = document.createElement("td");
@@ -836,19 +983,44 @@ function buildBulkRow(record, site = "Octane") {
   checkbox.checked = true;
   checkTd.appendChild(checkbox);
 
+  const sourceTd = document.createElement("td");
+  sourceTd.className = "row-source";
+  if (isJiraFlow) {
+    const sourceNumber = extractSourceNumberFromSummary(record.name);
+    if (sourceNumber && isSafeHttpUrl(record.sourceUrl)) {
+      const link = document.createElement("a");
+      link.href = record.sourceUrl;
+      link.title = `${sourceNumber} → ${record.sourceUrl}`;
+      link.textContent = sourceNumber;
+      link.rel = "noopener noreferrer";
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        chrome.tabs.create({ url: record.sourceUrl });
+      });
+      sourceTd.appendChild(link);
+    } else {
+      sourceTd.textContent = sourceNumber || "—";
+    }
+  } else {
+    sourceTd.classList.add("hidden");
+  }
+
   const idTd = document.createElement("td");
   idTd.className = "row-id";
-  if (record.sourceUrl && isSafeHttpUrl(record.sourceUrl)) {
+  const linkUrl = record.idLink || record.sourceUrl;
+  if (linkUrl && isSafeHttpUrl(linkUrl)) {
     const link = document.createElement("a");
-    link.href = record.sourceUrl;
-    link.title = record.sourceUrl;
-    link.textContent = record.idText || record.sourceUrl;
+    link.href = linkUrl;
+    link.title = linkUrl;
+    link.textContent = record.idText || linkUrl;
     link.rel = "noopener noreferrer";
     link.addEventListener("click", (e) => {
       e.preventDefault();
-      chrome.tabs.create({ url: record.sourceUrl });
+      chrome.tabs.create({ url: linkUrl });
     });
     idTd.appendChild(link);
+  } else if (record.idLink) {
+    idTd.textContent = record.idText || record.idLink;
   } else if (record.sourceUrl) {
 
     idTd.textContent = record.idText || record.sourceUrl;
@@ -871,7 +1043,7 @@ function buildBulkRow(record, site = "Octane") {
   statusTd.dataset.state = "pending";
   statusTd.textContent = "Not started";
 
-  tr.append(checkTd, idTd, titleTd, descTd, statusTd);
+  tr.append(checkTd, sourceTd, idTd, titleTd, descTd, statusTd);
 
   const row = {
     rowIndex: record.rowIndex,
@@ -880,6 +1052,8 @@ function buildBulkRow(record, site = "Octane") {
     description: record.description,
     sourceUrl: record.sourceUrl,
     idText: record.idText,
+    idLink: record.idLink,
+    sourceText: extractSourceNumberFromSummary(record.name),
     site: String(site || "Octane"),
     checkbox,
     statusEl: statusTd,
@@ -909,6 +1083,7 @@ function buildBulkRow(record, site = "Octane") {
     }
     shiftSelectAnchor = row;
     updateSelectionCount();
+    updateListingControls();
   });
 
   return { tr, row };

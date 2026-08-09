@@ -63,3 +63,41 @@ export async function getCurrentTab() {
   if (!tabs.length) throw new Error("No active tab found.");
   return tabs[0];
 }
+
+export async function runJiraApiInTab({
+  path,
+  method = "GET",
+  body,
+  headers = {},
+}) {
+  const tab = await getCurrentTab();
+  if (!tab?.id) throw new Error("No Jira tab found.");
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: async ({ path, method, body, headers }) => {
+      const hasBody = body !== undefined && body !== null;
+      const response = await fetch(path, {
+        method,
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          ...(hasBody ? { "Content-Type": "application/json" } : {}),
+          ...headers,
+        },
+        body: hasBody ? JSON.stringify(body) : undefined,
+      });
+      let data = null;
+      try {
+        data = await response.json();
+      } catch {}
+      return { ok: response.ok, status: response.status, data };
+    },
+    args: [{ path, method, body, headers }],
+    world: "ISOLATED",
+  });
+  const result = (results || [])[0]?.result;
+  if (!result) {
+    throw new Error("The Jira page didn't respond to the sync request.");
+  }
+  return result;
+}

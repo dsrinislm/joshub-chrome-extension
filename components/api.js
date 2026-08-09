@@ -1,6 +1,7 @@
 import { redirectToLogin, MAX_ATTACHMENT_UPLOAD_BYTES } from "./ui.js";
 import { sleep } from "./util.js";
 import { textToADF, adfToText } from "./adf.js";
+import { runJiraApiInTab } from "./scrape-detect.js";
 
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 
@@ -103,6 +104,118 @@ async function validateProject(jiraBaseUrl, projectKey) {
 
 function escapeJqlString(value) {
   return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+async function getJiraFilterJql(jiraBaseUrl, filterId) {
+  const target = String(filterId ?? "").trim();
+  if (!target) return { error: true, jql: null };
+  const response = await jiraFetch(
+    jiraBaseUrl,
+    `/rest/api/3/filter/${encodeURIComponent(target)}`,
+  );
+  if (!response.ok) return { error: true, jql: null };
+  const data = await response.json();
+  const jql = String(data?.jql || "").trim();
+  return jql ? { error: false, jql } : { error: true, jql: null };
+}
+
+async function searchJiraIssues(
+  jiraBaseUrl,
+  jql,
+  fields = ["summary"],
+  { maxResults = 100, limit = 500 } = {},
+) {
+  const issues = [];
+  let startAt = 0;
+  let total = Infinity;
+  while (issues.length < limit && startAt < total) {
+    let response;
+    try {
+      response = await jiraFetch(jiraBaseUrl, "/rest/api/3/search/jql", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jql: String(jql ?? ""),
+          fields,
+          maxResults,
+          startAt,
+        }),
+      });
+    } catch {
+      return { error: true, issues: [] };
+    }
+    if (!response.ok) return { error: true, issues: [] };
+    const data = await response.json();
+    const batch = Array.isArray(data?.issues) ? data.issues : [];
+    issues.push(...batch);
+    total = Number(data?.total) || issues.length;
+    if (batch.length === 0) break;
+    startAt += batch.length;
+  }
+  return { error: false, issues };
+}
+
+async function getJiraFilterJqlFromTab(filterId) {
+  const target = String(filterId ?? "").trim();
+  if (!target) return { error: true, jql: null, status: 0 };
+  try {
+    const { ok, status, data } = await runJiraApiInTab({
+      path: `/rest/api/3/filter/${encodeURIComponent(target)}`,
+    });
+    if (!ok) return { error: true, jql: null, status };
+    const jql = String(data?.jql || "").trim();
+    return jql ? { error: false, jql } : { error: true, jql: null, status };
+  } catch (err) {
+    return { error: true, jql: null, status: 0, message: err?.message };
+  }
+}
+
+async function getJiraIssueInTab(issueKey) {
+  const target = String(issueKey ?? "").trim();
+  if (!target) return { error: true, status: 0, issue: null };
+  try {
+    const { ok, status, data } = await runJiraApiInTab({
+      path: `/rest/api/3/issue/${encodeURIComponent(target)}`,
+    });
+    if (!ok || !data) return { error: true, status, issue: null };
+    return { error: false, issue: data };
+  } catch (err) {
+    return { error: true, status: 0, issue: null, message: err?.message };
+  }
+}
+
+async function searchJiraIssuesInTab(jql, fields = ["summary"]) {
+  const issues = [];
+  let startAt = 0;
+  let total = Infinity;
+  while (issues.length < 500 && startAt < total) {
+    let response;
+    try {
+      response = await runJiraApiInTab({
+        path: "/rest/api/3/search/jql",
+        method: "POST",
+        body: {
+          jql: String(jql ?? ""),
+          fields,
+          maxResults: 100,
+          startAt,
+        },
+      });
+    } catch (err) {
+      return { error: true, issues: [], status: 0, message: err?.message };
+    }
+    if (!response.ok) {
+      return { error: true, issues: [], status: response.status };
+    }
+    const batch = Array.isArray(response.data?.issues)
+      ? response.data.issues
+      : [];
+    issues.push(...batch);
+    total = Number(response.data?.total) || issues.length;
+    if (batch.length === 0) break;
+    startAt += batch.length;
+  }
+  return { error: false, issues };
 }
 
 async function searchByJql(jiraBaseUrl, jql, matches, fields = ["summary"]) {
@@ -460,6 +573,22 @@ async function listIssueAttachments(jiraBaseUrl, issueKey) {
   return attachments.map((a) => a.filename);
 }
 
+export async function listIssueAttachmentsDetailed(jiraBaseUrl, issueKey) {
+  const attachments = await fetchIssueAttachments(jiraBaseUrl, issueKey);
+  return (Array.isArray(attachments) ? attachments : [])
+    .map((a) => {
+      const size = Number(a.size);
+      const sizeBytes = Number.isFinite(size) && size >= 0 ? size : null;
+      return {
+        name: String(a.filename || "").trim(),
+        id: String(a.id || "").trim(),
+        sizeBytes,
+        size: sizeBytes == null ? "" : sizeBytes,
+      };
+    })
+    .filter((a) => a.name);
+}
+
 async function fetchJiraAttachmentDataUrl(jiraBaseUrl, attachmentId, onProgress) {
   const response = await jiraFetch(
     jiraBaseUrl,
@@ -600,6 +729,10 @@ async function addJiraComment(jiraBaseUrl, issueKey, body) {
 export {
   isJiraLoggedIn,
   validateProject,
+  getJiraFilterJql,
+  getJiraFilterJqlFromTab,
+  searchJiraIssues,
+  searchJiraIssuesInTab,
   findExistingJiraIssue,
   findExistingJiraIssueByUrl,
   findExistingJiraIssueFor,
@@ -612,5 +745,6 @@ export {
   listJiraCommentsDetailed,
   getJiraIssue,
   getJiraIssueWithAttachments,
+  getJiraIssueInTab,
   addJiraComment,
 };

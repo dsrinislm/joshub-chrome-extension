@@ -56,6 +56,7 @@ export const fileSummary = el("fileSummary");
 export const previewSection = el("previewSection");
 export const previewBody = el("previewBody");
 export const previewIdHeader = el("previewIdHeader");
+export const previewSourceHeader = el("previewSourceHeader");
 export const previewTitle = el("previewTitle");
 export const previewCollapseBtn = el("previewCollapseBtn");
 export const tableWrap = document.querySelector(".table-wrap");

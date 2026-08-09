@@ -94,6 +94,23 @@ export function jiraPageInfoFromUrl(url) {
   return null;
 }
 
+export function jiraFilterParamsFromUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(String(url || ""));
+  } catch {
+    return null;
+  }
+  const params = parsed.searchParams;
+  const filterId = (params.get("filter") || "").trim();
+  if (filterId) return { kind: "filter", filterId };
+  const jql = (params.get("jql") || params.get("jqlQuery") || "").trim();
+  if (jql) return { kind: "jql", jql };
+  const query = (params.get("query") || "").trim();
+  if (query) return { kind: "query", query };
+  return null;
+}
+
 export function formatDate(value) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value || "");
@@ -157,8 +174,8 @@ async function runInSparkTab({ sparkOrigin, sysId, comments, mappedIds, tab }) {
     let reports = [];
     let attempts = 0;
     let injectError = "";
-    while (attempts < 5 && reports.length === 0) {
-      if (attempts > 0) await sleep(1500);
+    while (attempts < 2 && reports.length === 0) {
+      if (attempts > 0) await sleep(600);
       try {
         reports = await run(activeTab);
       } catch (err) {
@@ -280,6 +297,78 @@ export async function detectJiraPageInTab() {
   const info = jiraPageInfoFromUrl(tab?.url);
   if (!info) return null;
   return { ...info, url: tab?.url || "" };
+}
+
+function scrapeJiraFilterSelectionInPage() {
+  const items = [];
+  const rows = document.querySelectorAll(
+    'tr[data-testid="native-issue-table.ui.issue-row"]',
+  );
+  rows.forEach((row) => {
+    const checkboxEl = row.querySelector('input[type="checkbox"]');
+    const isSelected =
+      row.getAttribute("aria-selected") === "true" ||
+      Boolean(checkboxEl?.checked) ||
+      Boolean(checkboxEl?.hasAttribute("checked"));
+    if (!isSelected) return;
+
+    const keyLink = row.querySelector(
+      'a[data-testid="native-issue-table.common.ui.issue-cells.issue-key.issue-key-cell"]',
+    );
+    const browseLink = keyLink || row.querySelector('a[href*="/browse/"]');
+    let key = (keyLink || browseLink)?.textContent.trim() || "";
+    if (!key) {
+      const label = row
+        .querySelector('input[aria-label]')
+        ?.getAttribute("aria-label") || "";
+      key = label.replace(/^work\s*item\s*:\s*/i, "").trim();
+    }
+    if (!key) return;
+
+    let summary = "";
+    const summaryEl = row.querySelector('[data-testid*="summary"]');
+    if (summaryEl) {
+      summary = String(summaryEl.textContent).replace(/\s+/g, " ").trim();
+    } else {
+      const tds = Array.from(row.querySelectorAll("td"));
+      const keyTdIndex = tds.findIndex(
+        (td) =>
+          td.querySelector('a[data-testid*="issue-key"]') ||
+          td.querySelector('a[href*="/browse/"]'),
+      );
+      const summaryTd = keyTdIndex >= 0 ? tds[keyTdIndex + 1] : tds[2];
+      if (summaryTd) {
+        summary = String(summaryTd.textContent).replace(/\s+/g, " ").trim();
+      }
+    }
+
+    items.push({ key: key.toUpperCase(), summary });
+  });
+  const seen = new Set();
+  const unique = [];
+  for (const item of items) {
+    const k = String(item.key || "").toUpperCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    unique.push(item);
+  }
+  return unique;
+}
+
+export async function scrapeJiraFilterSelectionInTab() {
+  const tab = await getCurrentTab();
+  if (!tab?.id) return [];
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: scrapeJiraFilterSelectionInPage,
+      args: [],
+      world: "ISOLATED",
+    });
+    return (results || [])[0]?.result || [];
+  } catch {
+    return [];
+  }
 }
 
 export async function detectJiraIssueInTab() {

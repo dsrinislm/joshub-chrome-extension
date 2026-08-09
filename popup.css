@@ -60,6 +60,12 @@ html {
 body {
   width: 460px;
   min-height: 480px;
+  /* Stack the header, form blocks and the active view so the active view can
+     stretch to fill the popup. This lets the bulk view's trailing filler keep
+     the sync CTA pinned at the bottom, so revealing the preview table never
+     shifts the CTA. */
+  display: flex;
+  flex-direction: column;
   /* Keep the body's total height under Chrome's 600px popup-window cap. If
      the body exactly hit the cap, Chrome would add its own ~15px window
      scrollbar and the popup width would shift by that amount as the
@@ -68,6 +74,7 @@ body {
      stays constant. */
   max-height: 592px;
   overflow-y: auto;
+  overflow-x: hidden;
   /* Reserve the scrollbar gutter so showing/hiding the vertical scrollbar
      (e.g. when the attachment picker appears) never shrinks the content
      area or reflows the form. Overlay scrollbars ignore this, which is
@@ -335,23 +342,35 @@ body {
   line-height: 1.4;
 }
 
-/* Both views share this minimum height so switching between the single
-   and bulk tabs never resizes the popup at initial load. Content (ticket
-   result, preview, status messages) can still grow the popup beyond this. */
-.view {
+/* Both views share one grid cell (the inactive one is only visibility-hidden,
+   it never collapses), so the popup is always as tall as the taller view and
+   switching tabs never resizes the popup regardless of how much content each
+   view grows. The stack fills the popup when content is short (flex-grow) but
+   never shrinks below its content (flex-shrink: 0): shrinking the stack below
+   its content made the grid content overflow and overlap the status bar. */
+#viewStack {
+  display: grid;
+  flex: 1 0 auto;
   min-height: 165px;
 }
 
-/* The single view is a flex column so the decorative canvas fills the gap
-   under the "Create ticket" CTA that appears while no source site is
-   detected (the source-site section is hidden). */
-#singleView {
+/* Each view is a flex column filling the shared cell; the decorative canvas
+   fills any trailing gap (e.g. the single view's gap under the "Create
+   ticket" CTA while no source site is detected). */
+#viewStack > .view {
+  grid-area: 1 / 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  /* Cap the active view at the popup's content width (460px body minus
+     21px side padding = 418px) so wide children (e.g. the attachment
+     picker rows) shrink instead of overflowing the popup window. */
+  max-width: 418px;
 }
 
-#singleView[hidden] {
-  display: none !important;
+#singleView[hidden],
+#bulkView[hidden] {
+  visibility: hidden;
 }
 
 .gap-art {
@@ -363,18 +382,9 @@ body {
   pointer-events: none;
 }
 
-#bulkView {
-  display: flex;
-  flex-direction: column;
-}
-
-#bulkView[hidden] {
-  display: none !important;
-}
-
 /* The bulk view's filler is a canvas too (see .gap-art), so the gap-art
    animation shows in its trailing space the same way it does in the single
-   view, keeping both panels at the same height at initial load. */
+   view, keeping both panels at the same height. */
 .view-fill {
   flex: 1 1 0;
   min-height: 0;
@@ -446,6 +456,16 @@ body {
   margin-bottom: 0;
 }
 
+.button-group.login-visible #createTicket,
+.button-group.login-visible #jiraToSparkSync {
+  display: none !important;
+}
+
+#bulkView.login-visible #importBtn,
+#bulkView.login-visible #listingImportBtn {
+  display: none !important;
+}
+
 button {
   flex: 1;
   display: flex;
@@ -508,10 +528,30 @@ button:disabled {
   width: 100%;
 }
 
+/* The bulk login button lives outside the views, directly above the shared
+   status bar (see popup.html), so the generic `button { flex: 1 }` would
+   stretch it vertically — pin it to its own height instead. */
+#bulkLoginBtn {
+  flex: 0 0 auto;
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
+/* Programmatic focus (showLoginButton) doesn't trip Chrome's :focus-visible
+   heuristic after a mouse click, so paint a visible ring on the login CTAs
+   whenever they hold focus. */
+#openWebsite:focus,
+#bulkLoginBtn:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 #listingImportBtn {
   /* Sits below the preview section, not inside it (the section is hidden
      until rows exist), so it must not stretch with the flex column. The 12px
-     bottom margin keeps it on the same rhythm as the .field-block sections. */
+     bottom margin keeps it on the same rhythm as the .field-block sections.
+     In normal flow (not sticky) it scrolls with the content, so it never
+     floats over the attachment section or the status bar. */
   flex: 0 0 auto;
   margin: 0 0 12px;
 }
@@ -580,6 +620,15 @@ button:disabled {
 #jiraToSparkSync:disabled {
   opacity: 0.55;
   cursor: default;
+}
+
+#listingImportBtn[data-loading="true"] .btn-icon {
+  display: none;
+}
+
+#listingImportBtn[data-loading="true"] .btn-spinner {
+  display: inline-block;
+  animation: spin 0.7s linear infinite;
 }
 
 @keyframes spin {
@@ -1067,7 +1116,9 @@ button:disabled {
   border-radius: 8px;
   padding: 6px 8px;
   max-height: 190px;
-  overflow: auto;
+  max-width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
   scrollbar-gutter: stable;
 }
 
@@ -1120,6 +1171,11 @@ button:disabled {
 }
 
 .attachment-picker-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 11.5px;
   font-weight: 600;
   color: var(--text-secondary);
@@ -1164,12 +1220,21 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   font-size: 10.5px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
   margin: 0 0 2px;
+}
+
+.attachment-group-title > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .attachment-group-title input[type="checkbox"] {
@@ -1190,6 +1255,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   font-size: 11.5px;
   padding: 1px 0 1px 18px;
   cursor: pointer;
@@ -1242,8 +1308,9 @@ button:disabled {
 }
 
 .attachment-item-name {
-  flex: 1;
+  flex: 1 1 0%;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1276,6 +1343,7 @@ button:disabled {
 .table-wrap {
   height: 150px;
   overflow-y: auto;
+  overflow-x: hidden;
   scrollbar-gutter: stable;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -1284,6 +1352,7 @@ button:disabled {
 
 table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 12px;
 }
@@ -1304,7 +1373,22 @@ thead th {
 }
 
 .col-check {
-  width: 30px;
+  width: 26px;
+}
+
+th.source-col,
+td.row-source {
+  width: 72px;
+}
+
+th#previewIdHeader,
+td.row-id {
+  width: 56px;
+}
+
+th:last-child,
+td.row-status {
+  width: 72px;
 }
 
 tbody td {
@@ -1375,6 +1459,29 @@ tbody tr:last-child td {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.row-source {
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-source a {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+  text-decoration: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.row-source a:hover {
+  color: var(--accent-strong);
+  text-decoration: underline;
 }
 
 .row-id a {

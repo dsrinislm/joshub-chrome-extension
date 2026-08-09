@@ -8,7 +8,6 @@ import {
   jiraBaseUrlInput,
   projectKeyInput,
   bulkView,
-  singleView,
   createTicketBtn,
   createTicketLabel,
   singleAttachments,
@@ -29,6 +28,7 @@ import {
   getActiveListingSite,
   getSourceSite,
   getIncludeAttachments,
+  setIncludeAttachments,
   getSelectedAttachments,
   setAttachmentPickerLoading,
   clearAttachmentPicker,
@@ -70,7 +70,11 @@ import {
   setJiraSyncFlowActive,
   markAttachmentsSynced,
   updateAttachmentIncludeSyncState,
+  updateBulkGroupSizeLabels,
   updateBulkIncludeSyncState,
+  setJiraFilterActive,
+  isJiraFilterActive,
+  isBulkBusy,
   showLoginButton,
   hideLoginButtons,
 } from "./components/ui.js";
@@ -84,6 +88,7 @@ import {
   scrapeTab,
   getCurrentTab,
 } from "./components/scrape.js";
+import { runJiraApiInTab } from "./components/scrape-detect.js";
 import { startGapArt } from "./components/gap-art.js";
 import { handleFileSelected, downloadPreviewReport } from "./components/excel.js";
 import { loadInitialState, saveSettings } from "./components/storage.js";
@@ -98,13 +103,16 @@ import {
 import {
   findExistingJiraIssueFor,
   getJiraIssueWithAttachments,
-  listIssueAttachments,
+  listIssueAttachmentsDetailed,
 } from "./components/api.js";
+import { ensureJiraReady } from "./components/session.js";
 import { extractSourceUrl } from "./components/adf.js";
 import { createTicket, setSparkToJiraLookupCache } from "./components/single-ticket.js";
 import {
   runBulkImport,
   runListingImport,
+  runJiraFilterImport,
+  loadJiraFilterRows,
   requestAbort,
 } from "./components/bulk-import.js";
 import { requestUploadCancel } from "./components/attachments.js";
@@ -145,9 +153,13 @@ importBtn.addEventListener("click", () => {
   scrollBulkToFirstSelected();
   runBulkImport();
 });
-listingImportBtn.addEventListener("click", () =>
-  runListingImport(getActiveListingSite()),
-);
+listingImportBtn.addEventListener("click", () => {
+  if (isJiraFilterActive()) {
+    runJiraFilterImport();
+  } else {
+    runListingImport(getActiveListingSite());
+  }
+});
 exportBtn.addEventListener("click", downloadPreviewReport);
 
 jiraBaseUrlInput.addEventListener("input", (e) => {
@@ -365,9 +377,36 @@ function attachmentType(name) {
 includeAttachmentsInput.addEventListener("change", async () => {
   if (!getIncludeAttachments()) {
     clearAttachmentPicker();
+    setStatus("Attachments skipped.", "info");
     return;
   }
 
+  const jiraConfigured =
+    jiraBaseUrlInput.value.trim() && projectKeyInput.value.trim();
+  if (!jiraFlowActive) {
+    const ctx = getJiraContext();
+    if (!ctx) {
+      setIncludeAttachments(false);
+      setStatus("Configure Jira details to sync attachments.", "error");
+      showLoginButton(
+        jiraBaseUrlInput.value.trim() || "https://id.atlassian.com",
+        "Log in to Jira",
+      );
+      return;
+    }
+    const ready = await ensureJiraReady(ctx.jiraOrigin, ctx.projectKey);
+    if (!ready) {
+      setIncludeAttachments(false);
+      return;
+    }
+    hideLoginButtons();
+  } else if (!jiraConfigured) {
+    setIncludeAttachments(false);
+    setStatus("Configure Jira details to sync attachments.", "error");
+    return;
+  }
+
+  setStatus("Loading attachments...", "loading");
   setAttachmentPickerLoading();
   smoothScrollToBottom();
   detectionLocked = true;
@@ -399,6 +438,7 @@ includeAttachmentsInput.addEventListener("change", async () => {
       if (!getIncludeAttachments()) return;
       if (loginRequired) {
         setSyncedTicketFound(false);
+        setStatus("Not logged in to Spark — log in and retry.", "error");
         attachmentGroups.innerHTML =
           '<div class="attachment-group-title">Not logged in to Spark — log in and retry.</div>';
         if (attachmentPickerTitle) {
@@ -413,9 +453,11 @@ includeAttachmentsInput.addEventListener("change", async () => {
       }
       renderAttachmentPicker(items, syncedNames);
       setAttachmentNote(note || "");
+      setStatus("Choose attachments to upload.", "info");
       smoothScrollToBottom();
     } catch {
       setSyncedTicketFound(false);
+      setStatus("Couldn't list attachments.", "error");
       attachmentGroups.innerHTML =
         '<div class="attachment-group-title">Couldn’t list attachments.</div>';
       if (attachmentPickerTitle) {
@@ -542,9 +584,11 @@ includeAttachmentsInput.addEventListener("change", async () => {
       : "";
     renderAttachmentPicker(renderItems, syncedNames);
     setAttachmentNote(note);
+    setStatus("Choose attachments to upload.", "info");
     smoothScrollToBottom();
   } catch {
     setSyncedTicketFound(false);
+    setStatus("Couldn't list attachments.", "error");
     attachmentGroups.innerHTML =
       '<div class="attachment-group-title">Couldn’t list attachments.</div>';
     if (attachmentPickerTitle) {
@@ -574,9 +618,167 @@ attachmentSelectAll.addEventListener("change", () => {
 });
 
 bulkIncludeAttachments.addEventListener("change", async () => {
+  if (isJiraFilterActive()) {
+    if (!getBulkIncludeAttachments()) {
+      clearBulkAttachmentPicker();
+      setBulkPreviewCollapsed(false);
+      return;
+    }
+
+    if (!state.bulkRows.length) {
+      await loadJiraFilterRows();
+    }
+
+    const seenRows = new Set();
+    const selectedRows = state.bulkRows.filter((r) => {
+      if (!r.checkbox.checked) return false;
+      const k = String(r.idText || "").trim().toUpperCase();
+      if (seenRows.has(k)) return false;
+      seenRows.add(k);
+      return true;
+    });
+    if (!selectedRows.length) {
+      bulkIncludeAttachments.checked = false;
+      bulkIncludeAttachments.indeterminate = false;
+      setStatus("Select the issues on the Jira page to sync.", "error");
+      clearBulkAttachmentPicker();
+      return;
+    }
+
+    setBulkPreviewCollapsed(true);
+    setBulkAttachmentPickerLoading();
+    smoothScrollToBottom();
+
+    try {
+      let jiraOrigin = "";
+      try {
+        const tab = await getCurrentTab();
+        jiraOrigin = new URL(tab?.url || "").origin;
+      } catch {}
+
+      const groups = [];
+      const labels = {};
+      const syncedMap = {};
+      let skipped = 0;
+      for (const row of selectedRows) {
+        const key = String(row.idText || "").trim();
+        if (!key) continue;
+        let merged = [];
+        let syncedNames = new Set();
+        let jiraAttachments = [];
+        let fetchedData = null;
+        try {
+          const fetched = await runJiraApiInTab({
+            path: `/rest/api/3/issue/${encodeURIComponent(key)}?fields=attachment,description`,
+          });
+          fetchedData = fetched.data;
+          jiraAttachments = Array.isArray(
+            fetched?.data?.fields?.attachment,
+          )
+            ? fetched.data.fields.attachment
+                .map((a) => {
+                  const name = String(a.filename || "").trim();
+                  const id = String(a.id || "").trim();
+                  const size = Number(a.size);
+                  return {
+                    name,
+                    id,
+                    sizeBytes: size,
+                    size,
+                    mimeType: String(a.mimeType || ""),
+                    type: attachmentType(name),
+                    url: `${jiraOrigin}/rest/api/3/attachment/content/${encodeURIComponent(id)}`,
+                    source: "jira",
+                  };
+                })
+                .filter((a) => a.name)
+            : [];
+        } catch {}
+
+        const description = fetchedData?.fields?.description || "";
+        const sourceUrl =
+          String(row.sourceUrl || "").trim() || extractSourceUrl(description);
+        if (sourceUrl) {
+          const cachedJiraData = {
+            issue: fetchedData,
+            attachments: jiraAttachments,
+          };
+          try {
+            const result = /entityType=work_item|shared_spaces|#\/entity-navigation/.test(
+              sourceUrl,
+            )
+              ? await getSyncOctaneAttachmentItems({
+                  jiraOrigin,
+                  issueKey: key,
+                  cachedJiraData,
+                  sourceUrl,
+                })
+              : await getSyncAttachmentItems({
+                  jiraOrigin,
+                  issueKey: key,
+                  cachedJiraData,
+                  sourceUrl,
+                });
+            if (result?.items?.length) {
+              merged = result.items.map((item) =>
+                item.source === "Jira"
+                  ? { ...item, source: "jira" }
+                  : item,
+              );
+            } else {
+              merged = jiraAttachments;
+            }
+            syncedNames = result?.syncedNames || new Set();
+            skipped += result?.skipped || 0;
+          } catch {
+            merged = jiraAttachments;
+          }
+        } else {
+          merged = jiraAttachments;
+        }
+        const listable = merged.filter(
+          (a) =>
+            !Number.isFinite(a.sizeBytes) ||
+            a.sizeBytes <= MAX_ATTACHMENT_UPLOAD_BYTES,
+        );
+        skipped += merged.length - listable.length;
+        groups.push({ id: key, attachments: listable });
+        labels[key] = key;
+        if (syncedNames.size) syncedMap[key] = syncedNames;
+      }
+
+      const fullySynced = fullySyncedIds(groups, syncedMap);
+      renderBulkAttachmentPicker(groups, labels, syncedMap);
+      markBulkRowsFullySynced(fullySynced);
+      setBulkAttachmentNote(
+        skipped
+          ? `${skipped} file(s) over 25 MB skipped — add them from the Jira UI.`
+          : "",
+      );
+      setStatus(
+        "Select which attachments to sync between Jira and the linked Octane/Spark tickets.",
+        "info",
+      );
+      smoothScrollToBottom();
+    } catch {
+      setStatus("Couldn't list attachments for the selected issues.", "error");
+      bulkAttachmentGroups.innerHTML =
+        '<div class="attachment-group-title">Couldn’t list attachments.</div>';
+      if (bulkAttachmentPickerTitle) {
+        bulkAttachmentPickerTitle.textContent =
+          "Choose attachments to upload (0)";
+      }
+      smoothScrollToBottom();
+    } finally {
+      setBulkAttachmentSyncProgress(false);
+    }
+    return;
+  }
+
   if (!getBulkIncludeAttachments()) {
     clearBulkAttachmentPicker();
     setBulkPreviewCollapsed(false);
+    setStatus("Attachments skipped.", "info");
     return;
   }
 
@@ -589,14 +791,41 @@ bulkIncludeAttachments.addEventListener("change", async () => {
     return;
   }
 
+  const ctx = getJiraContext();
+  if (!ctx) {
+    bulkIncludeAttachments.checked = false;
+    bulkIncludeAttachments.indeterminate = false;
+    setStatus("Configure Jira details to sync attachments.", "error");
+    showLoginButton(
+      jiraBaseUrlInput.value.trim() || "https://id.atlassian.com",
+      "Log in to Jira",
+    );
+    return;
+  }
+  const ready = await ensureJiraReady(ctx.jiraOrigin, ctx.projectKey);
+  if (!ready) {
+    bulkIncludeAttachments.checked = false;
+    bulkIncludeAttachments.indeterminate = false;
+    return;
+  }
+  hideLoginButtons();
+
+  setStatus("Loading attachments...", "loading");
   setBulkAttachmentPickerLoading();
   smoothScrollToBottom();
 
   try {
-    const items =
+    const scrapedItems =
       site === "Spark"
         ? await scrapeSelectedSparkListingInTab()
         : await scrapeSelectedListingInTab();
+    const seenItems = new Set();
+    const items = scrapedItems.filter((item) => {
+      const id = String(item?.id ?? "").trim();
+      if (!id || seenItems.has(id)) return false;
+      seenItems.add(id);
+      return true;
+    });
     if (!getBulkIncludeAttachments()) return;
     if (!items.length) {
       setStatus(
@@ -636,7 +865,10 @@ bulkIncludeAttachments.addEventListener("change", async () => {
       ? `${skipped} file(s) over 25 MB skipped — add them from the Jira UI.`
       : "";
 
-    const syncedMap = await buildBulkSyncedMap(items, site);
+    const { synced: syncedMap, sizes: jiraMeta } = await buildBulkSyncedMap(
+      items,
+      site,
+    );
     if (!getBulkIncludeAttachments()) return;
 
     const fullySynced = fullySyncedIds(groups, syncedMap);
@@ -647,15 +879,25 @@ bulkIncludeAttachments.addEventListener("change", async () => {
           (group.attachments || []).map((a) => a.name),
         );
         const jiraNames = syncedMap[String(group.id)] || new Set();
+        const metaByName = new Map(
+          (jiraMeta[String(group.id)] || []).map((a) => [a.name, a]),
+        );
         const jiraOnly = Array.from(jiraNames)
           .filter((name) => !sourceNames.has(name))
-          .map((name) => ({
-            name,
-            source: "jira",
-            sizeBytes: null,
-            size: "",
-            type: "other",
-          }));
+          .map((name) => {
+            const meta = metaByName.get(name) || {};
+            const sizeBytes =
+              Number.isFinite(meta.sizeBytes) && meta.sizeBytes > 0
+                ? meta.sizeBytes
+                : null;
+            return {
+              name,
+              source: "jira",
+              sizeBytes,
+              size: sizeBytes == null ? "" : sizeBytes,
+              type: attachmentType(name),
+            };
+          });
         if (jiraOnly.length) {
           group.attachments = (group.attachments || []).concat(jiraOnly);
         }
@@ -686,9 +928,10 @@ bulkIncludeAttachments.addEventListener("change", async () => {
 
 async function buildBulkSyncedMap(items, site) {
   const ctx = getJiraContext();
-  if (!ctx || !items.length) return {};
+  if (!ctx || !items.length) return { synced: {}, sizes: {} };
   const { jiraOrigin, projectKey } = ctx;
   const synced = {};
+  const sizes = {};
   let next = 0;
   const MAX_CONCURRENCY = 4;
   const worker = async () => {
@@ -705,8 +948,14 @@ async function buildBulkSyncedMap(items, site) {
           item.url,
         );
         if (!found.issue) continue;
-        const names = await listIssueAttachments(jiraOrigin, found.issue.key);
-        synced[String(item.id)] = new Set(names);
+        const attachments = await listIssueAttachmentsDetailed(
+          jiraOrigin,
+          found.issue.key,
+        );
+        synced[String(item.id)] = new Set(
+          attachments.map((a) => a.name),
+        );
+        sizes[String(item.id)] = attachments;
       } catch {
 
       }
@@ -715,7 +964,7 @@ async function buildBulkSyncedMap(items, site) {
   await Promise.all(
     Array.from({ length: Math.min(MAX_CONCURRENCY, items.length) }, worker),
   );
-  return synced;
+  return { synced, sizes };
 }
 
 function fullySyncedIds(groups, syncedMap) {
@@ -753,6 +1002,7 @@ bulkAttachmentSelectAll.addEventListener("change", () => {
       for (const box of boxes) if (box.checked) checkedCount++;
       groupCheck.checked = checkedCount > 0 && checkedCount === boxes.length;
     });
+  updateBulkGroupSizeLabels();
   updateBulkIncludeSyncState();
 });
 
@@ -796,7 +1046,7 @@ function syncJiraContextFromTab(info) {
 }
 
 async function applyDetectedState() {
-  if (getBusy() || detectionLocked) return;
+  if (getBusy() || detectionLocked || isBulkBusy()) return;
 
   setSyncedTicketFound(false);
   resetTicketCard();
@@ -807,6 +1057,7 @@ async function applyDetectedState() {
   let listing = null;
   let selectedCount = 0;
   if (!jiraPage) {
+    setJiraFilterActive(false);
     try {
       ({ site, listing, selectedCount } = await detectTabState());
     } catch {
@@ -827,8 +1078,12 @@ async function applyDetectedState() {
 
   let onSyncFlow = false;
   if (jiraPage?.type === "filter") {
-    onSyncFlow = true;
+    setJiraFilterActive(true);
+    try {
+      await loadJiraFilterRows();
+    } catch {}
   } else if (jiraPage?.type === "ticket") {
+    setJiraFilterActive(false);
     try {
       const cached =
         cachedJiraSyncData &&
@@ -849,6 +1104,8 @@ async function applyDetectedState() {
     } catch {
       onSyncFlow = false;
     }
+  } else if (jiraPage) {
+    setJiraFilterActive(false);
   }
   const isTicketContext = matched || onSyncFlow;
   tabSingle.hidden = !isTicketContext;
@@ -877,7 +1134,15 @@ async function applyDetectedState() {
   if (buttonGroup) {
     buttonGroup.style.display = "";
   }
-  if (jiraFlowActive && !bulkView.hidden) {
+  const shouldShowBulk = isJiraFilterActive() || listing;
+  if (shouldShowBulk) {
+    if (bulkView.hidden) {
+      switchView("bulk", false);
+    }
+    if (listingImportBtn && listingImportBtn.style.display !== "none") {
+      listingImportBtn.focus({ preventScroll: true });
+    }
+  } else if (jiraFlowActive && !bulkView.hidden) {
     switchView("single", false);
   }
 
@@ -890,7 +1155,7 @@ async function applyDetectedState() {
   } else if (jiraPage) {
     setStatus(
       jiraPage.type === "filter"
-        ? "Jira filter detected — base URL set."
+        ? "Jira filter detected — select tickets to sync with Octane/Spark."
         : jiraPage.projectKey
           ? `Jira project ${jiraPage.projectKey} detected — base URL and project key set.`
           : "Jira page detected — base URL set.",
@@ -902,24 +1167,7 @@ async function applyDetectedState() {
   }
 }
 
-applyDetectedState().then(equalizeInitialViewHeights);
-
-function equalizeInitialViewHeights() {
-  const views = [singleView, bulkView];
-  let tallest = 0;
-  for (const view of views) {
-
-    const wasHidden = view.hidden;
-    view.hidden = false;
-    tallest = Math.max(tallest, view.offsetHeight);
-    view.hidden = wasHidden;
-  }
-  if (tallest > 0) {
-    for (const view of views) {
-      view.style.minHeight = `${tallest}px`;
-    }
-  }
-}
+applyDetectedState();
 
 const debouncedDetectState = debounce(applyDetectedState, 150);
 chrome.tabs.onActivated.addListener(debouncedDetectState);
@@ -929,3 +1177,4 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     debouncedDetectState();
   }
 });
+window.addEventListener("focus", debouncedDetectState);

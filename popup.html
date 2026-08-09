@@ -53,8 +53,12 @@
     </button>
   </div>
 
-  <!-- Single-ticket view -->
-  <div id="singleView" class="view">
+  <!-- Single-ticket view. Both views share the same grid cell (see
+       #viewStack in popup.css), so the inactive view keeps occupying its
+       space instead of collapsing, and switching tabs never resizes the
+       popup regardless of how much content each view grows. -->
+  <div id="viewStack">
+    <div id="singleView" class="view">
     <section class="field-block hidden">
       <span class="field-label" id="sourceSiteLabel">
         <svg class="field-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 12h17M12 3.5c2.2 2.3 3.3 5 3.3 8.5s-1.1 6.2-3.3 8.5c-2.2-2.3-3.3-5-3.3-8.5S9.8 5.8 12 3.5Z" stroke="currentColor" stroke-width="1.8"/></svg>
@@ -209,6 +213,7 @@
           <thead>
             <tr>
               <th class="col-check"><span class="select-all"><input id="selectAllCheckbox" type="checkbox" checked aria-label="Select all" /></span></th>
+              <th id="previewSourceHeader" class="source-col hidden">Source</th>
               <th id="previewIdHeader">ID</th>
               <th>Title</th>
               <th>Description preview</th>
@@ -253,11 +258,6 @@
         </button>
       </div>
 
-      <button id="bulkLoginBtn" class="btn-ghost" type="button" style="display: none;">
-        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <span class="btn-label">Log in to Jira</span>
-      </button>
-
       <button id="exportBtn" class="btn-ghost" type="button" style="display: none;">
         <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Download report
@@ -265,12 +265,19 @@
     </section>
 
     <button id="listingImportBtn" type="button" class="btn-primary" style="display: none;">
+      <span class="btn-spinner" aria-hidden="true"></span>
       <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 14h8M12 10v8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       <span id="listingImportLabel">Sync selected octane listing</span>
     </button>
 
     <canvas id="gapArtBulk" class="view-fill gap-art" aria-hidden="true"></canvas>
+    </div>
   </div>
+
+  <button id="bulkLoginBtn" class="btn-ghost" type="button" style="display: none;">
+    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span class="btn-label">Log in to Jira</span>
+  </button>
 
   <!-- Shared status bar, used by both views -->
   <div id="status" class="status" data-state="info">

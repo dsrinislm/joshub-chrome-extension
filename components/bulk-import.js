@@ -2,6 +2,7 @@ import {
   state,
   setStatus,
   setBulkBusy,
+  isBulkBusy,
   hideLoginButtons,
   setRowStatus,
   updateProgress,
@@ -10,6 +11,7 @@ import {
   exportBtn,
   progressSection,
   previewBody,
+  previewSection,
   selectAllLabel,
   addBulkRow,
   reorderBulkRowsAfterImport,
@@ -20,6 +22,7 @@ import {
   lockBulkImport,
   setBulkRowsFromListing,
   updateSelectionCount,
+  syncListingControls,
   frameBulkView,
   getBulkIncludeAttachments,
   getBulkSelectedAttachments,
@@ -39,14 +42,16 @@ import {
   fetchListingDetailsInTab,
   fetchSparkCommentsInTab,
   fetchOctaneCommentsInTab,
+  getCurrentTab,
 } from "./scrape.js";
 import { syncSourceComments } from "./comments.js";
 import {
   findExistingJiraIssueFor,
   createJiraIssue,
   getJiraIssueWithAttachments,
+  getJiraIssueInTab,
 } from "./api.js";
-import { buildIssueDescription, sourceUrlBlock } from "./adf.js";
+import { buildIssueDescription, sourceUrlBlock, adfToText, extractSourceUrl } from "./adf.js";
 import {
   attachImagesToIssue,
   uploadMissingAttachments,
@@ -55,11 +60,17 @@ import {
 import {
   syncJiraCommentsToOctane,
   syncOctaneAttachmentsInOrigin,
+  syncOctaneUpdates,
 } from "./jira-to-octane.js";
 import {
   syncSparkAttachmentsInOrigin,
   parseSourceUrl,
 } from "./spark-attachments.js";
+import { syncJiraUpdates } from "./spark-sync.js";
+import {
+  jiraFilterParamsFromUrl,
+  scrapeJiraFilterSelectionInTab,
+} from "./spark-controller.js";
 import { ensureJiraReady } from "./session.js";
 import { sleep } from "./util.js";
 
@@ -132,7 +143,7 @@ function finishBulkRun({ total, projectKey, counters, completed, doneMessage }) 
     return;
   }
 
-  if (counters.created > 0 || counters.skipped > 0) {
+  if ((counters.created > 0 || counters.skipped > 0) && projectKey) {
     saveProjectHistory(projectKey);
   }
 
@@ -732,6 +743,263 @@ export async function runListingImport(site) {
     });
 
     markBulkAttachmentsSynced(uploadedAttachments);
+  } finally {
+    abortImportBtn.style.display = "none";
+    setBulkBusy(false);
+    frameBulkView();
+  }
+}
+
+function sourceSiteFromSourceUrl(sourceUrl) {
+  return /entityType=work_item|shared_spaces|#\/entity-navigation/.test(
+    String(sourceUrl || ""),
+  )
+    ? "Octane"
+    : "Spark";
+}
+
+function syncBitsForRow(result, flowSite) {
+  const { report, sparkToJira, attachments, attachmentsToSpark } = result || {};
+  const bits = [];
+  if (report?.posted > 0) {
+    bits.push(`${report.posted} Jira comment(s) → ${flowSite}`);
+  }
+  if (report?.failed > 0) {
+    bits.push(`${report.failed} Jira comment(s) failed → ${flowSite}`);
+  }
+  if (sparkToJira?.added > 0) {
+    bits.push(`${sparkToJira.added} ${flowSite} comment(s) → Jira`);
+  }
+  if (attachments?.uploaded > 0) {
+    bits.push(`${attachments.uploaded} attachment(s) → Jira`);
+  } else if (attachments?.failed > 0) {
+    bits.push(`${attachments.failed} attachment(s) failed → Jira`);
+  }
+  if (attachmentsToSpark?.uploaded > 0) {
+    bits.push(`${attachmentsToSpark.uploaded} attachment(s) → ${flowSite}`);
+  } else if (attachmentsToSpark?.failed > 0) {
+    bits.push(
+      `${attachmentsToSpark.failed} attachment(s) failed → ${flowSite}${escapeHtml(failedAttachmentNames(attachmentsToSpark.failedNames))}`,
+    );
+  }
+  return bits;
+}
+
+let jiraFilterLoadedForUrl = null;
+
+export async function loadJiraFilterRows() {
+  if (isBulkBusy()) return false;
+
+  const tab = await getCurrentTab();
+  const params = jiraFilterParamsFromUrl(tab?.url || "");
+  if (!params) {
+    setStatus("Open a Jira filter page (Issues) to run the sync.", "error");
+    return false;
+  }
+
+  const currentUrl = tab?.url || "";
+  if (jiraFilterLoadedForUrl === currentUrl && state.bulkRows.length) {
+    return true;
+  }
+  jiraFilterLoadedForUrl = currentUrl;
+
+  setBulkRowsFromListing(true);
+  setStatus("Reading the issues selected on the Jira page…", "loading");
+
+  const items = await scrapeJiraFilterSelectionInTab();
+  const seenKeys = new Set();
+  const uniqueItems = [];
+  for (const item of items) {
+    const k = String(item.key || "").toUpperCase();
+    if (seenKeys.has(k)) continue;
+    seenKeys.add(k);
+    uniqueItems.push(item);
+  }
+  if (!uniqueItems.length) {
+    setBulkRowsFromListing(false);
+    syncListingControls();
+    setStatus("Select the issues on the Jira page to sync.", "info");
+    return false;
+  }
+
+  let jiraOrigin = "";
+  try {
+    jiraOrigin = new URL(tab?.url || "").origin;
+  } catch {}
+  if (!jiraOrigin) {
+    setBulkRowsFromListing(false);
+    syncListingControls();
+    setStatus("Couldn't determine the Jira site from this page.", "error");
+    return false;
+  }
+
+  previewBody.innerHTML = "";
+  state.bulkRows = [];
+  selectAllLabel?.classList.remove("hidden");
+
+  const records = await Promise.all(
+    uniqueItems.map(async (item) => {
+      const fetched = await getJiraIssueInTab(item.key);
+      const fields = fetched.issue?.fields || {};
+      return {
+        rowIndex: item.key,
+        idText: item.key,
+        name: String(fields.summary || item.summary || ""),
+        description: adfToText(fields.description),
+        sourceUrl: extractSourceUrl(fields.description) || "",
+        idLink: `${jiraOrigin}/browse/${item.key}`,
+      };
+    }),
+  );
+  records.forEach((record) => addBulkRow(record, "Jira"));
+
+  previewSection.style.display = "none";
+
+  syncListingControls();
+
+  frameBulkView();
+
+  scrollBulkToFirstSelected();
+
+  return true;
+}
+
+export async function runJiraFilterImport() {
+  if (!(await loadJiraFilterRows())) return;
+
+  previewSection.style.display = "block";
+
+  setBulkRowsFromListing(true);
+
+  hideBulkMediaProgress();
+
+  let jiraOrigin = "";
+  try {
+    const tab = await getCurrentTab();
+    jiraOrigin = new URL(tab?.url || "").origin;
+  } catch {}
+  if (!jiraOrigin) {
+    setStatus("Open a Jira filter page (Issues) to run the sync.", "error");
+    return;
+  }
+
+  hideLoginButtons();
+  exportBtn.style.display = "none";
+  setBulkBusy(true);
+
+  scrollBulkToFirstSelected();
+
+  abortRequested = false;
+  abortImportBtn.disabled = false;
+  abortImportBtn.style.display = "inline-flex";
+
+  try {
+    const selectedRows = state.bulkRows.filter(
+      (r) => r.checkbox.checked && !r.checkbox.disabled,
+    );
+    if (!selectedRows.length) {
+      setStatus("Select the issues on the Jira page to sync.", "error");
+      return;
+    }
+
+    const includeAttachments = getBulkIncludeAttachments();
+    const bulkAttachmentSelection = getBulkSelectedAttachments();
+
+    progressSection.style.display = "block";
+    updateProgress(0, selectedRows.length, "Starting sync…");
+
+    const { counters, completed } = await runBulkWorkerPool(
+      selectedRows.length,
+      async (index, counters, progress) => {
+        if (abortRequested) return;
+
+        const row = selectedRows[index];
+        setStatus(
+          `Processing ${progress.completed + 1} of ${selectedRows.length} (${row.idText})...`,
+          "loading",
+        );
+        setRowStatus(row, "checking", "Checking…");
+
+        try {
+          let sourceUrl = row.sourceUrl;
+          if (!sourceUrl) {
+            const fetched = await getJiraIssueInTab(row.idText);
+            if (fetched.error || !fetched.issue) {
+              setRowStatus(
+                row,
+                "error",
+                "Couldn't read the Jira ticket from this page",
+              );
+              counters.failed++;
+              return;
+            }
+            row.sourceUrl =
+              extractSourceUrl(fetched.issue?.fields?.description) || "";
+          }
+          sourceUrl = row.sourceUrl;
+          if (!sourceUrl) {
+            setRowStatus(
+              row,
+              "error",
+              "No linked Octane/Spark ticket in the description",
+            );
+            counters.failed++;
+            return;
+          }
+
+          const flowSite = sourceSiteFromSourceUrl(sourceUrl);
+          const selectedNames =
+            includeAttachments && bulkAttachmentSelection
+              ? bulkAttachmentSelection[String(row.idText)] || undefined
+              : undefined;
+          const result =
+            flowSite === "Octane"
+              ? await syncOctaneUpdates({
+                  jiraOrigin,
+                  issueKey: row.idText,
+                  includeAttachments,
+                  selectedAttachments: selectedNames,
+                  selectionJiraToSourceOnly: true,
+                })
+              : await syncJiraUpdates({
+                  jiraOrigin,
+                  issueKey: row.idText,
+                  includeAttachments,
+                  selectedAttachments: selectedNames,
+                  selectionJiraToSourceOnly: true,
+                });
+
+          const bits = syncBitsForRow(result, flowSite);
+          const failed =
+            result.report?.failed > 0 ||
+            result.attachments?.failed > 0 ||
+            result.attachmentsToSpark?.failed > 0;
+          const url = `${jiraOrigin}/browse/${row.idText}`;
+          const statusHtml = `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(row.idText)}</a>${bits.length ? ` — ${bits.join("; ")}` : ""}`;
+
+          if (failed) {
+            setRowStatus(row, "error", statusHtml);
+            counters.failed++;
+          } else {
+            setRowStatus(row, "exists", statusHtml);
+            counters.skipped++;
+          }
+        } catch (err) {
+          setRowStatus(row, "error", escapeHtml(err.message || "Sync failed"));
+          counters.failed++;
+        }
+        scrollBulkRowTop(row);
+      },
+    );
+
+    finishBulkRun({
+      total: selectedRows.length,
+      projectKey: "",
+      counters,
+      completed,
+      doneMessage: (_selectableRemain, c) =>
+        `Done. Synced ${c.skipped} of ${selectedRows.length} ticket(s), ${c.failed} failed.`,
+    });
   } finally {
     abortImportBtn.style.display = "none";
     setBulkBusy(false);

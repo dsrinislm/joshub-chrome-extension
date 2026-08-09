@@ -1,6 +1,7 @@
 export {
   detectJiraPageInTab,
   detectJiraIssueInTab,
+  scrapeJiraFilterSelectionInTab,
   syncJiraCommentsToSpark,
 } from "./spark-controller.js";
 export {

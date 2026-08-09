@@ -32,6 +32,7 @@ export async function syncJiraUpdates({
   issueKey,
   includeAttachments = true,
   selectedAttachments,
+  selectionJiraToSourceOnly = false,
   cachedJiraData,
 }) {
   let issue;
@@ -94,9 +95,11 @@ export async function syncJiraUpdates({
           jiraItems.map((item) => [item.name, Number(item.size) || null]),
         );
         const images = await fetchSparkAttachmentsInOrigin({ sparkOrigin, sysId, tab });
-        const imagesToSync = selected.size
-          ? images.filter((img) => selected.has(img.name))
-          : images;
+        const imagesToSync = selectionJiraToSourceOnly
+          ? images
+          : selected.size
+            ? images.filter((img) => selected.has(img.name))
+            : images;
         let progressReady = false;
         const ensureProgress = () => {
           if (progressReady) return;
@@ -136,9 +139,11 @@ export async function syncJiraUpdates({
             }
           });
         }
-        const jiraToSync = selected.size
+        const jiraToSync = selectionJiraToSourceOnly
           ? jiraItems.filter((item) => selected.has(item.name))
-          : jiraItems;
+          : selected.size
+            ? jiraItems.filter((item) => selected.has(item.name))
+            : jiraItems;
         if (jiraToSync.length) {
           ensureProgress();
           const offset = imagesToSync.length;

@@ -34,6 +34,7 @@ import {
   attachmentByteSize,
   MAX_ATTACHMENT_UPLOAD_BYTES,
 } from "./ui-single.js";
+import { sleep } from "./util.js";
 
 function waitForTabComplete(tabId, timeoutMs = 20000) {
   return new Promise((resolve) => {
@@ -350,6 +351,7 @@ export async function getSyncOctaneAttachmentItems({
   jiraOrigin,
   issueKey,
   cachedJiraData,
+  sourceUrl,
 }) {
   let issue;
   let attachments;
@@ -367,22 +369,31 @@ export async function getSyncOctaneAttachmentItems({
       issueKey,
     ));
   }
-  const sourceUrl = extractSourceUrl(issue?.fields?.description);
-  if (!sourceUrl) {
+  const srcUrl = sourceUrl || extractSourceUrl(issue?.fields?.description);
+  if (!srcUrl) {
     return { items: [], syncedNames: new Set() };
   }
-  const ctx = parseOctaneSourceUrl(sourceUrl);
+  const ctx = parseOctaneSourceUrl(srcUrl);
   let octaneItems = [];
   try {
     octaneItems = await useOctaneTab(
-      { octaneOrigin: ctx.octaneOrigin, sourceUrl },
+      { octaneOrigin: ctx.octaneOrigin, sourceUrl: srcUrl },
       async (tab) => {
-        const groups = await listListingAttachmentsInTab(
-          [ctx.workItemId],
-          "Octane",
-          tab.id,
-        );
-        return groups[0]?.attachments || [];
+        let items = [];
+        let attempts = 0;
+        while (attempts < 2 && items.length === 0) {
+          if (attempts > 0) await sleep(300);
+          try {
+            const groups = await listListingAttachmentsInTab(
+              [ctx.workItemId],
+              "Octane",
+              tab.id,
+            );
+            items = groups[0]?.attachments || [];
+          } catch {}
+          attempts++;
+        }
+        return items;
       },
     );
   } catch {}
@@ -460,6 +471,7 @@ export async function syncOctaneUpdates({
   issueKey,
   includeAttachments = true,
   selectedAttachments,
+  selectionJiraToSourceOnly = false,
   cachedJiraData,
 }) {
   let issue;
@@ -550,16 +562,19 @@ export async function syncOctaneUpdates({
             "Octane",
             {
               includeAttachments: true,
-              selectedAttachments: selected.size
-                ? { [String(ctx.workItemId)]: [...selected] }
-                : undefined,
+              selectedAttachments:
+                !selectionJiraToSourceOnly && selected.size
+                  ? { [String(ctx.workItemId)]: [...selected] }
+                  : undefined,
             },
             tab.id,
           );
           const sourceImages = details[0]?.images || [];
-          const jiraToSync = selected.size
+          const jiraToSync = selectionJiraToSourceOnly
             ? jiraItems.filter((item) => selected.has(item.name))
-            : jiraItems;
+            : selected.size
+              ? jiraItems.filter((item) => selected.has(item.name))
+              : jiraItems;
           let progressReady = false;
           const ensureProgress = () => {
             if (progressReady) return;
