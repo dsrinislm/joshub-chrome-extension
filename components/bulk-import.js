@@ -56,6 +56,10 @@ import {
   syncJiraCommentsToOctane,
   syncOctaneAttachmentsInOrigin,
 } from "./jira-to-octane.js";
+import {
+  syncSparkAttachmentsInOrigin,
+  parseSourceUrl,
+} from "./spark-attachments.js";
 import { ensureJiraReady } from "./session.js";
 import { sleep } from "./util.js";
 
@@ -490,6 +494,10 @@ export async function runListingImport(site) {
           }
 
           if (flowSite === "Octane") {
+            console.log("[octane-sync-back] reached", {
+              include: getBulkIncludeAttachments(),
+              issue: existing.issue.key,
+            });
             if (getBulkIncludeAttachments()) {
               try {
                 const { attachments: jiraAttachments } =
@@ -497,16 +505,48 @@ export async function runListingImport(site) {
                     jiraOrigin,
                     existing.issue.key,
                   );
-                if (jiraAttachments.length) {
+                console.log("[octane-sync-back] jira attachments", jiraAttachments);
+                const selection = getBulkSelectedAttachments();
+                const selectedNames = selection
+                  ? selection[String(items[index].id)]
+                  : undefined;
+                const filesToSync =
+                  selectedNames !== undefined
+                    ? jiraAttachments.filter((a) =>
+                        selectedNames.includes(a.name),
+                      )
+                    : jiraAttachments;
+                if (filesToSync.length) {
+                  const mediaRow = mediaRowByItemIndex.get(index);
+                  if (mediaRow !== undefined) {
+                    startBulkMediaProgress(mediaRow);
+                    updateBulkMediaFiles(mediaRow, 0, filesToSync.length);
+                  }
                   const octaneBack = await syncOctaneAttachmentsInOrigin({
                     jiraOrigin,
                     sourceUrl: detail.url || row.sourceUrl,
-                    files: jiraAttachments,
+                    files: filesToSync,
+                    onFileProgress: (fileIndex, loaded, total) => {
+                      if (mediaRow !== undefined) {
+                        updateBulkMediaProgress(mediaRow, loaded, total);
+                      }
+                    },
+                    onProgress: (done, total) => {
+                      if (mediaRow !== undefined) {
+                        updateBulkMediaFiles(mediaRow, done, total);
+                      }
+                    },
                   });
+                  if (mediaRow !== undefined) setBulkMediaProgressDone(mediaRow);
                   if (octaneBack.uploaded > 0) {
                     statusHtml = `${statusHtml} — ${octaneBack.uploaded} Jira attachment(s) synced to Octane`;
                   } else if (octaneBack.failed > 0) {
                     statusHtml = `${statusHtml} — ${octaneBack.failed} Jira attachment(s) failed to sync to Octane${failedAttachmentNames(octaneBack.failedNames)}`;
+                  }
+                  if (octaneBack.uploadedNames?.length) {
+                    uploadedAttachments[String(items[index].id)] = (
+                      uploadedAttachments[String(items[index].id)] || []
+                    ).concat(octaneBack.uploadedNames);
                   }
                 }
               } catch (err) {
@@ -528,6 +568,79 @@ export async function runListingImport(site) {
                 statusHtml = `${statusHtml} — ${back.report.failed} Jira comment(s) failed to sync back to Octane`;
               }
             } catch {}
+          } else if (flowSite === "Spark") {
+            if (getBulkIncludeAttachments()) {
+              try {
+                const { attachments: jiraAttachments } =
+                  await getJiraIssueWithAttachments(
+                    jiraOrigin,
+                    existing.issue.key,
+                  );
+                const selection = getBulkSelectedAttachments();
+                const selectedNames = selection
+                  ? selection[String(items[index].id)]
+                  : undefined;
+                const filesToSync =
+                  selectedNames !== undefined
+                    ? jiraAttachments.filter((a) =>
+                        selectedNames.includes(a.name),
+                      )
+                    : jiraAttachments;
+                if (filesToSync.length) {
+                  const mediaRow = mediaRowByItemIndex.get(index);
+                  if (mediaRow !== undefined) {
+                    startBulkMediaProgress(mediaRow);
+                    updateBulkMediaFiles(mediaRow, 0, filesToSync.length);
+                  }
+                  const { sparkOrigin, sysId } = parseSourceUrl(
+                    detail.url || row.sourceUrl,
+                  );
+                  let sparkBackDone = 0;
+                  const sparkBack = await syncSparkAttachmentsInOrigin({
+                    jiraOrigin,
+                    sparkOrigin,
+                    sysId,
+                    files: filesToSync,
+                    onFileProgress: (fileIndex, loaded, total) => {
+                      if (mediaRow !== undefined) {
+                        updateBulkMediaProgress(mediaRow, loaded, total);
+                      }
+                    },
+                    onFileState: (fileIndex, state) => {
+                      if (
+                        mediaRow !== undefined &&
+                        (state === "done" ||
+                          state === "failed" ||
+                          state === "skipped")
+                      ) {
+                        sparkBackDone++;
+                        updateBulkMediaFiles(
+                          mediaRow,
+                          sparkBackDone,
+                          filesToSync.length,
+                        );
+                      }
+                    },
+                  });
+                  if (mediaRow !== undefined) setBulkMediaProgressDone(mediaRow);
+                  if (sparkBack.uploaded > 0) {
+                    statusHtml = `${statusHtml} — ${sparkBack.uploaded} Jira attachment(s) synced to Spark`;
+                  } else if (sparkBack.failed > 0) {
+                    statusHtml = `${statusHtml} — ${sparkBack.failed} Jira attachment(s) failed to sync to Spark${failedAttachmentNames(sparkBack.failedNames)}`;
+                  }
+                  if (sparkBack.uploadedNames?.length) {
+                    uploadedAttachments[String(items[index].id)] = (
+                      uploadedAttachments[String(items[index].id)] || []
+                    ).concat(sparkBack.uploadedNames);
+                  }
+                }
+              } catch (err) {
+                console.error(
+                  "Couldn't sync Jira attachments to Spark:",
+                  err,
+                );
+              }
+            }
           }
 
           setRowStatus(row, "exists", statusHtml);

@@ -163,7 +163,9 @@ export function renderBulkAttachmentPicker(groups, labels = {}, syncedMap = {}) 
     const ticketId = String(group.id);
     const synced = syncedMap[ticketId] || new Set();
 
-    const selectable = files.filter((f) => !synced.has(f.name));
+    const selectable = files.filter(
+      (f) => f.source === "jira" || !synced.has(f.name),
+    );
     state.bulkAttachmentSelection[ticketId] = selectable.map((f) => f.name);
 
     const block = document.createElement("div");
@@ -210,7 +212,7 @@ export function renderBulkAttachmentPicker(groups, labels = {}, syncedMap = {}) 
     block.dataset.size = totalSize;
 
     for (const item of files) {
-      const alreadySynced = synced.has(item.name);
+      const alreadySynced = item.source !== "jira" && synced.has(item.name);
       const row = document.createElement("label");
       row.className = "attachment-item" + (alreadySynced ? " attachment-item-synced" : "");
 
@@ -315,7 +317,11 @@ export function updateBulkIncludeSyncState() {
     (total > 0 && boxes.length === 0);
   if (allSynced) {
     bulkIncludeAttachments.checked = true;
-    bulkIncludeAttachments.disabled = true;
+    if (activeListingSite !== "Octane") {
+      bulkIncludeAttachments.disabled = true;
+    } else {
+      bulkIncludeAttachments.disabled = false;
+    }
   } else {
     bulkIncludeAttachments.disabled = false;
   }

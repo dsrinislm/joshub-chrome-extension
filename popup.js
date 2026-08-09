@@ -639,9 +639,32 @@ bulkIncludeAttachments.addEventListener("change", async () => {
     const syncedMap = await buildBulkSyncedMap(items, site);
     if (!getBulkIncludeAttachments()) return;
 
+    const fullySynced = fullySyncedIds(groups, syncedMap);
+
+    if (site === "Octane" || site === "Spark") {
+      for (const group of groups) {
+        const sourceNames = new Set(
+          (group.attachments || []).map((a) => a.name),
+        );
+        const jiraNames = syncedMap[String(group.id)] || new Set();
+        const jiraOnly = Array.from(jiraNames)
+          .filter((name) => !sourceNames.has(name))
+          .map((name) => ({
+            name,
+            source: "jira",
+            sizeBytes: null,
+            size: "",
+            type: "other",
+          }));
+        if (jiraOnly.length) {
+          group.attachments = (group.attachments || []).concat(jiraOnly);
+        }
+      }
+    }
+
     renderBulkAttachmentPicker(groups, labels, syncedMap);
     setBulkAttachmentNote(note);
-    markBulkRowsFullySynced(fullySyncedIds(groups, syncedMap));
+    markBulkRowsFullySynced(fullySynced);
 
     setStatus(
       "Attachments are checked against Jira during import — files already attached to existing tickets are skipped.",
@@ -673,10 +696,7 @@ async function buildBulkSyncedMap(items, site) {
       const item = items[next++];
       try {
 
-        const title =
-          site === "Spark"
-            ? `SPARK | ${item.number || item.id} | ${item.name || ""}`
-            : item.name || "";
+        const title = `${site.toUpperCase()} | ${item.number || item.id} | ${item.name || ""}`;
         if (!title) continue;
         const found = await findExistingJiraIssueFor(
           jiraOrigin,

@@ -18,7 +18,18 @@ import {
 } from "./comment-map.js";
 import { extractSourceUrl } from "./adf.js";
 import { syncOctaneComments } from "./comments.js";
-import { uploadMissingAttachments } from "./attachments.js";
+import {
+  uploadMissingAttachments,
+  dataUrlSize,
+  imageUploadFilename,
+} from "./attachments.js";
+import {
+  startSyncAttachmentProgress,
+  addSyncAttachmentProgressRow,
+  setSyncAttachmentProgress,
+  setSyncAttachmentState,
+  syncAbortBtn,
+} from "./ui.js";
 import {
   attachmentByteSize,
   MAX_ATTACHMENT_UPLOAD_BYTES,
@@ -191,6 +202,11 @@ export async function syncOctaneAttachmentsInOrigin({
   onFileState,
 }) {
   const ctx = parseOctaneSourceUrl(sourceUrl);
+  console.log("[octane-sync-back] ctx", {
+    octaneOrigin: ctx.octaneOrigin,
+    workItemId: ctx.workItemId,
+    sourceUrl,
+  });
   let existing = new Set();
   try {
     const groups = await listListingAttachmentsInTab(
@@ -200,6 +216,7 @@ export async function syncOctaneAttachmentsInOrigin({
     );
     existing = new Set((groups[0]?.attachments || []).map((a) => a.name));
   } catch {}
+  console.log("[octane-sync-back] existing on octane", Array.from(existing));
 
   const outcomes = new Array(files.length);
   let next = 0;
@@ -310,6 +327,15 @@ export async function syncOctaneAttachmentsInOrigin({
   await Promise.all(
     Array.from({ length: Math.min(3, files.length) }, worker),
   );
+  console.log("[octane-sync-back] summary", {
+    uploaded: uploadedCount,
+    uploadedNames,
+    failed: failedCount,
+    failedNames,
+    firstError,
+    skipped: files.length - uploadedCount - failedCount,
+    fileCount: files.length,
+  });
   return {
     uploaded: uploadedCount,
     uploadedNames,
@@ -546,7 +572,25 @@ export async function syncOctaneUpdates({
             tab.id,
           );
           const sourceImages = details[0]?.images || [];
+          const jiraToSync = selected.size
+            ? jiraItems.filter((item) => selected.has(item.name))
+            : jiraItems;
+          let progressReady = false;
+          const ensureProgress = () => {
+            if (progressReady) return;
+            progressReady = true;
+            startSyncAttachmentProgress();
+            syncAbortBtn.disabled = false;
+          };
           if (sourceImages.length) {
+            ensureProgress();
+            sourceImages.forEach((img) => {
+              addSyncAttachmentProgressRow({
+                label: img.name || imageUploadFilename(img),
+                size: img.sizeBytes ?? dataUrlSize(img.dataUrl),
+                hint: "Uploading to Jira…",
+              });
+            });
             attachments = await uploadMissingAttachments(
               jiraOrigin,
               issueKey,
@@ -554,18 +598,42 @@ export async function syncOctaneUpdates({
               undefined,
               undefined,
               jiraNames,
+              (index, loaded, total) =>
+                setSyncAttachmentProgress(index, loaded, total),
             );
+            const skippedSet = new Set(attachments.skippedNames || []);
+            const failedSet = new Set(attachments.failedNames || []);
+            sourceImages.forEach((img, i) => {
+              const name = String(img.name || imageUploadFilename(img));
+              if (skippedSet.has(name)) {
+                setSyncAttachmentState(i, "skipped", "Already on Jira");
+              } else if (failedSet.has(name)) {
+                setSyncAttachmentState(i, "failed", "Upload to Jira failed");
+              } else {
+                setSyncAttachmentState(i, "done", "Synced to Jira");
+              }
+            });
           }
 
-          const jiraToSync = selected.size
-            ? jiraItems.filter((item) => selected.has(item.name))
-            : jiraItems;
           if (jiraToSync.length) {
+            ensureProgress();
+            const offset = sourceImages.length;
+            jiraToSync.forEach((item) => {
+              addSyncAttachmentProgressRow({
+                label: item.name,
+                size: Number(item.size) || 0,
+                hint: "Queued…",
+              });
+            });
             attachmentsToOctane = await syncOctaneAttachmentsInOrigin({
               jiraOrigin,
               sourceUrl,
               files: jiraToSync,
               tab,
+              onFileProgress: (index, loaded, total) =>
+                setSyncAttachmentProgress(offset + index, loaded, total),
+              onFileState: (index, state, message) =>
+                setSyncAttachmentState(offset + index, state, message),
             });
           }
         } catch {}
