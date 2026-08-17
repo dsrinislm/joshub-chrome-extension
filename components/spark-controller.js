@@ -135,14 +135,12 @@ function waitForTabComplete(tabId, timeoutMs = 20000) {
 
 export async function useSparkTab({ sparkOrigin, sysId, requireTicket = true }, fn) {
   const sourceUrl = `${sparkOrigin}/incident.do?sys_id=${encodeURIComponent(sysId)}`;
+  const allTabs = await chrome.tabs.query({ url: `${sparkOrigin}/*` });
   let tab = null;
-  if (!requireTicket) {
-    const tabs = await chrome.tabs.query({ url: `${sparkOrigin}/*` });
-    tab = tabs[0] || null;
+  if (requireTicket) {
+    tab = allTabs.find((t) => (t.url || "").includes(sysId)) || allTabs[0] || null;
   } else {
-    tab = (await chrome.tabs.query({ url: `${sparkOrigin}/*` })).find((t) =>
-      (t.url || "").includes(sysId),
-    );
+    tab = allTabs[0] || null;
   }
   let created = false;
   if (!tab) {

@@ -298,7 +298,9 @@ export function fetchListingDetailsInPage(ids, site, options = {}) {
         throw new Error(`${apiName} ${response.status}`);
       }
       const data = await response.json();
-      const { html, images } = await captureImages(data.description);
+      const captured = await captureImages(data.description);
+      let html = captured.html;
+      const { images } = captured;
 
       if (includeAttachments) {
         const query = `owner_work_item EQ {id EQ ${id}}`;

@@ -1,3 +1,5 @@
+import "./libraries/jira-adf.cjs";
+
 import {
   tabSingle,
   tabBulk,
