@@ -1,4 +1,5 @@
-import "./libraries/jira-adf.cjs";
+import { htmlToADF } from "./libraries/jira-adf.cjs";
+window.htmlToADF = htmlToADF;
 
 import {
   tabSingle,
