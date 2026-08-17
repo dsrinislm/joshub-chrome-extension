@@ -523,15 +523,19 @@ button:disabled {
 }
 
 #bulkLoginBtn,
+#bulkSparkLoginBtn,
+#bulkOctaneLoginBtn,
 #exportBtn,
 #listingImportBtn {
   width: 100%;
 }
 
-/* The bulk login button lives outside the views, directly above the shared
+/* The bulk login buttons live outside the views, directly above the shared
    status bar (see popup.html), so the generic `button { flex: 1 }` would
-   stretch it vertically — pin it to its own height instead. */
-#bulkLoginBtn {
+   stretch them vertically — pin them to their own height instead. */
+#bulkLoginBtn,
+#bulkSparkLoginBtn,
+#bulkOctaneLoginBtn {
   flex: 0 0 auto;
   margin-top: 0;
   margin-bottom: 12px;
@@ -541,7 +545,9 @@ button:disabled {
    heuristic after a mouse click, so paint a visible ring on the login CTAs
    whenever they hold focus. */
 #openWebsite:focus,
-#bulkLoginBtn:focus {
+#bulkLoginBtn:focus,
+#bulkSparkLoginBtn:focus,
+#bulkOctaneLoginBtn:focus {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -1110,6 +1116,24 @@ button:disabled {
   }
 }
 
+/* While the popup probes the Spark/Octane sessions in background tabs the
+   "Include attachments" checkbox is left unchecked and blinks inside its
+   square to signal the in-progress check. */
+.attach-toggle.checking input[type="checkbox"] {
+  animation: attach-blink 1s ease-in-out infinite;
+}
+
+@keyframes attach-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.3;
+  }
+}
+
 .attachment-picker {
   margin-top: 8px;
   border: 1px solid var(--border);
@@ -1179,22 +1203,6 @@ button:disabled {
   font-size: 11.5px;
   font-weight: 600;
   color: var(--text-secondary);
-}
-
-.attachment-picker-toggle {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.attachment-picker-toggle input[type="checkbox"] {
-  width: 12px;
-  height: 12px;
-  accent-color: var(--accent);
-  cursor: pointer;
 }
 
 .attachment-note {

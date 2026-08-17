@@ -13,6 +13,8 @@ export const gapArt = el("gapArt");
 export const gapArtBulk = el("gapArtBulk");
 export const loginBtn = el("openWebsite");
 export const bulkLoginBtn = el("bulkLoginBtn");
+export const bulkSparkLoginBtn = el("bulkSparkLoginBtn");
+export const bulkOctaneLoginBtn = el("bulkOctaneLoginBtn");
 export const exportBtn = el("exportBtn");
 export const jiraBaseUrlInput = el("jiraBaseUrl");
 export const jiraBaseUrlError = el("jiraBaseUrlError");
@@ -28,14 +30,12 @@ export const includeAttachmentsInput = el("includeAttachments");
 export const attachmentPicker = el("attachmentPicker");
 export const attachmentPickerTitle = el("attachmentPickerTitle");
 export const attachmentGroups = el("attachmentGroups");
-export const attachmentSelectAll = el("attachmentSelectAll");
 export const attachmentNote = el("attachmentNote");
 export const bulkAttachmentSection = el("bulkAttachmentSection");
 export const bulkIncludeAttachments = el("bulkIncludeAttachments");
 export const bulkAttachmentPicker = el("bulkAttachmentPicker");
 export const bulkAttachmentPickerTitle = el("bulkAttachmentPickerTitle");
 export const bulkAttachmentGroups = el("bulkAttachmentGroups");
-export const bulkAttachmentSelectAll = el("bulkAttachmentSelectAll");
 export const bulkAttachmentNote = el("bulkAttachmentNote");
 
 for (const picker of [attachmentPicker, bulkAttachmentPicker]) {

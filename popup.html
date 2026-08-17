@@ -88,10 +88,6 @@
             <svg class="attachment-picker-chevron" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span id="attachmentPickerTitle" class="attachment-picker-title">Choose attachments to upload</span>
           </button>
-          <label class="attachment-picker-toggle" for="attachmentSelectAll">
-            <input id="attachmentSelectAll" type="checkbox" checked />
-            Select all
-          </label>
         </div>
         <div id="attachmentNote" class="attachment-note" hidden></div>
         <div id="attachmentGroups" class="attachment-groups"></div>
@@ -182,10 +178,6 @@
             <svg class="attachment-picker-chevron" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span id="bulkAttachmentPickerTitle" class="attachment-picker-title">Choose attachments to upload</span>
           </button>
-          <label class="attachment-picker-toggle" for="bulkAttachmentSelectAll">
-            <input id="bulkAttachmentSelectAll" type="checkbox" checked />
-            Select all
-          </label>
         </div>
         <div id="bulkAttachmentNote" class="attachment-note" hidden></div>
         <div id="bulkAttachmentGroups" class="attachment-groups"></div>
@@ -277,6 +269,16 @@
   <button id="bulkLoginBtn" class="btn-ghost" type="button" style="display: none;">
     <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
     <span class="btn-label">Log in to Jira</span>
+  </button>
+
+  <button id="bulkSparkLoginBtn" class="btn-ghost" type="button" style="display: none;">
+    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span class="btn-label">Log in to Spark</span>
+  </button>
+
+  <button id="bulkOctaneLoginBtn" class="btn-ghost" type="button" style="display: none;">
+    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span class="btn-label">Log in to Octane</span>
   </button>
 
   <!-- Shared status bar, used by both views -->

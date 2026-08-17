@@ -4,7 +4,6 @@ import {
   attachmentNote,
   attachmentPicker,
   attachmentPickerTitle,
-  attachmentSelectAll,
   bulkAttachmentPicker,
   bulkView,
   createTicketBtn,
@@ -60,7 +59,6 @@ export function setAttachmentPickerLoading() {
   attachmentGroups.innerHTML = "";
   setAttachmentNote("");
   attachmentPickerHasNoAttachments = false;
-  updateAttachmentSelectAll();
   updateAttachmentIncludeSyncState();
   setAttachmentSyncProgress(true);
   state.attachmentSelection = null;
@@ -72,7 +70,6 @@ export function clearAttachmentPicker() {
   setAttachmentNote("");
   attachmentPickerHasNoAttachments = false;
   setAttachmentSyncProgress(false);
-  attachmentSelectAll.checked = true;
   state.attachmentSelection = null;
 
   syncedTicketFound = false;
@@ -90,6 +87,121 @@ let attachmentPickerHasNoAttachments = false;
 let syncedTicketFound = false;
 
 let ticketCardShown = false;
+
+let pickerItems = [];
+let pickerSyncedNames = new Set();
+
+function pickerSizeSuffix() {
+  const totalBytes = pickerItems.reduce(
+    (sum, item) => sum + (Number(item.sizeBytes) || 0),
+    0,
+  );
+  const totalSize = formatBytes(totalBytes);
+  if (!totalSize || totalSize === "0 B") return "";
+  const selectable = pickerItems.filter(
+    (item) => !pickerSyncedNames.has(item.name),
+  );
+  if (!selectable.length) return totalSize;
+  const selected = new Set(state.attachmentSelection || []);
+  const selBytes = pickerItems.reduce(
+    (sum, item) =>
+      sum + (selected.has(item.name) ? Number(item.sizeBytes) || 0 : 0),
+    0,
+  );
+  const selSize = formatBytes(selBytes);
+  if (selBytes <= 0) return "";
+  if (selBytes >= totalBytes) return totalSize;
+  return `${selSize} of ${totalSize}`;
+}
+
+function updateAttachmentPickerTitleSize() {
+  if (!attachmentPickerTitle) return;
+  const base = `Choose attachments to upload (${pickerItems.length})`;
+  const suffix = pickerSizeSuffix();
+  attachmentPickerTitle.textContent = suffix ? `${base} · ${suffix}` : base;
+}
+
+function itemType(item) {
+  return item.type === "video" || item.type === "image" ? item.type : "other";
+}
+
+function buildCategoryTitleText(type) {
+  const list = pickerItems.filter((item) => itemType(item) === type);
+  const totalBytes = list.reduce(
+    (sum, item) => sum + (Number(item.sizeBytes) || 0),
+    0,
+  );
+  const totalSize = formatBytes(totalBytes);
+  if (!totalSize || totalSize === "0 B") {
+    return `${ATTACHMENT_GROUP_LABELS[type]} (${list.length})`;
+  }
+  const selectable = list.filter((item) => !pickerSyncedNames.has(item.name));
+  if (!selectable.length) {
+    return `${ATTACHMENT_GROUP_LABELS[type]} (${list.length}) · ${totalSize}`;
+  }
+  const selected = new Set(state.attachmentSelection || []);
+  const selBytes = list.reduce(
+    (sum, item) =>
+      sum + (selected.has(item.name) ? Number(item.sizeBytes) || 0 : 0),
+    0,
+  );
+  const selSize = formatBytes(selBytes);
+  if (selBytes <= 0) {
+    return `${ATTACHMENT_GROUP_LABELS[type]} (${list.length})`;
+  }
+  if (selBytes >= totalBytes) {
+    return `${ATTACHMENT_GROUP_LABELS[type]} (${list.length}) · ${totalSize}`;
+  }
+  return `${ATTACHMENT_GROUP_LABELS[type]} (${list.length}) · ${selSize} of ${totalSize}`;
+}
+
+function updateCategoryTitleText(type) {
+  const groupCheck = attachmentGroups.querySelector(
+    `.attachment-group-check[data-category="${type}"]`,
+  );
+  const titleText = groupCheck
+    ?.closest(".attachment-group")
+    ?.querySelector(".attachment-group-title span");
+  if (!titleText) return;
+  titleText.textContent = buildCategoryTitleText(type);
+}
+
+function updateCategoryTitles() {
+  attachmentGroups
+    .querySelectorAll(".attachment-group-check")
+    .forEach((check) => updateCategoryTitleText(check.dataset.category));
+}
+
+function updateAttachmentSizeLabels() {
+  updateCategoryTitles();
+  updateAttachmentPickerTitleSize();
+}
+
+function updateCategoryCheck(groupCheck) {
+  if (!groupCheck) return;
+  const group = groupCheck.closest(".attachment-group");
+  if (!group) return;
+  const boxes = group.querySelectorAll(
+    ".attachment-item:not(.attachment-item-synced) input[type='checkbox']",
+  );
+  if (!boxes.length) {
+    groupCheck.checked = true;
+    groupCheck.disabled = true;
+    groupCheck.indeterminate = false;
+    return;
+  }
+  groupCheck.disabled = false;
+  let checked = 0;
+  for (const box of boxes) if (box.checked) checked++;
+  groupCheck.checked = checked > 0 && checked === boxes.length;
+  groupCheck.indeterminate = checked > 0 && checked < boxes.length;
+}
+
+function updateCategoryChecks() {
+  attachmentGroups
+    .querySelectorAll(".attachment-group-check")
+    .forEach(updateCategoryCheck);
+}
 
 export function setSyncedTicketFound(found) {
   syncedTicketFound = Boolean(found);
@@ -154,9 +266,8 @@ export function renderAttachmentPicker(items, syncedNames = new Set()) {
   attachmentGroups.innerHTML = "";
   attachmentPickerHasNoAttachments = false;
   state.attachmentSelection = [];
-  if (attachmentPickerTitle) {
-    attachmentPickerTitle.textContent = `Choose attachments to upload (${items.length})`;
-  }
+  pickerItems = items;
+  pickerSyncedNames = syncedNames || new Set();
 
   const grouped = { video: [], image: [], other: [] };
   for (const item of items) {
@@ -172,13 +283,36 @@ export function renderAttachmentPicker(items, syncedNames = new Set()) {
     const group = document.createElement("div");
     group.className = "attachment-group";
 
-    const groupSize = formatBytes(
-      list.reduce((sum, item) => sum + (Number(item.sizeBytes) || 0), 0),
-    );
-
     const title = document.createElement("div");
     title.className = "attachment-group-title";
-    title.textContent = `${ATTACHMENT_GROUP_LABELS[type]} (${list.length})${groupSize && groupSize !== "0 B" ? ` · ${groupSize}` : ""}`;
+
+    const groupCheck = document.createElement("input");
+    groupCheck.type = "checkbox";
+    groupCheck.className = "attachment-group-check";
+    groupCheck.dataset.category = type;
+    groupCheck.title = `Select all ${ATTACHMENT_GROUP_LABELS[type]} attachments`;
+    groupCheck.addEventListener("change", () => {
+      const boxes = group.querySelectorAll(
+        ".attachment-item:not(.attachment-item-synced) input[type='checkbox']",
+      );
+      const selected = new Set(state.attachmentSelection || []);
+      for (const box of boxes) {
+        box.checked = groupCheck.checked;
+        if (groupCheck.checked) {
+          selected.add(box.dataset.name);
+        } else {
+          selected.delete(box.dataset.name);
+        }
+      }
+      state.attachmentSelection = Array.from(selected);
+      updateCategoryChecks();
+      updateAttachmentIncludeSyncState();
+      updateAttachmentSizeLabels();
+    });
+
+    const titleText = document.createElement("span");
+    titleText.textContent = buildCategoryTitleText(type);
+    title.append(groupCheck, titleText);
     group.appendChild(title);
 
     for (const item of list) {
@@ -202,8 +336,9 @@ export function renderAttachmentPicker(items, syncedNames = new Set()) {
         state.attachmentSelection = checkbox.checked
           ? [...selected, item.name]
           : selected.filter((n) => n !== item.name);
-        updateAttachmentSelectAll();
+        updateCategoryChecks();
         updateAttachmentIncludeSyncState();
+        updateAttachmentSizeLabels();
       });
 
       const name = document.createElement("span");
@@ -234,38 +369,12 @@ export function renderAttachmentPicker(items, syncedNames = new Set()) {
     attachmentPickerHasNoAttachments = true;
   }
 
-  updateAttachmentSelectAll();
+  updateCategoryChecks();
   updateAttachmentIncludeSyncState();
+  updateAttachmentSizeLabels();
 }
 
 let singleBusy = false;
-
-function updateAttachmentSelectAll() {
-  if (!attachmentSelectAll) return;
-  const allBoxes = attachmentGroups.querySelectorAll(
-    ".attachment-item input[type='checkbox']",
-  );
-
-  const boxes = attachmentGroups.querySelectorAll(
-    ".attachment-item:not(.attachment-item-synced) input[type='checkbox']",
-  );
-
-  const toggle = attachmentSelectAll.closest(".attachment-picker-toggle");
-  toggle?.classList.toggle("hidden", singleBusy || boxes.length === 0);
-  let checked = 0;
-  for (const box of boxes) if (box.checked) checked++;
-
-  if (boxes.length === 0) {
-
-    attachmentSelectAll.checked = allBoxes.length > 0;
-    attachmentSelectAll.disabled = allBoxes.length > 0;
-    attachmentSelectAll.indeterminate = false;
-    return;
-  }
-  attachmentSelectAll.disabled = false;
-  attachmentSelectAll.checked = checked > 0 && checked === boxes.length;
-  attachmentSelectAll.indeterminate = checked > 0 && checked < boxes.length;
-}
 
 export function updateAttachmentIncludeSyncState() {
   if (!includeAttachmentsInput) return;
@@ -320,8 +429,9 @@ export function markAttachmentsSynced(uploadedNames) {
     const selected = state.attachmentSelection || [];
     state.attachmentSelection = selected.filter((n) => n !== name);
   }
-  updateAttachmentSelectAll();
+  updateCategoryChecks();
   updateAttachmentIncludeSyncState();
+  updateAttachmentSizeLabels();
 }
 export function getSourceSite() {
   return sourceSiteInput.checked ? "Spark" : "Octane";
@@ -368,7 +478,6 @@ export function setBusy(isBusy) {
   projectKeyInput.disabled = isBusy;
   includeAttachmentsInput.disabled = isBusy;
   if (isBusy) collapseAttachmentPickers();
-  updateAttachmentSelectAll();
 
   if (!isBusy) updateAttachmentIncludeSyncState();
 }

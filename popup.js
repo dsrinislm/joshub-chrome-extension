@@ -23,6 +23,7 @@ import {
   switchView,
   toggleSelectAll,
   updateBulkStatusMessage,
+  syncListingControls,
   abortImportBtn,
   listingImportBtn,
   getActiveListingSite,
@@ -38,11 +39,12 @@ import {
   resetTicketCard,
   attachmentPickerTitle,
   attachmentGroups,
-  attachmentSelectAll,
   includeAttachmentsInput,
   state,
   smoothScrollToBottom,
   revealStatus,
+  previewBody,
+  previewSection,
   syncAbortBtn,
   finishSyncProgress,
   refreshSingleViewStatus,
@@ -51,6 +53,8 @@ import {
   MAX_ATTACHMENT_UPLOAD_BYTES,
   getBulkIncludeAttachments,
   setBulkPreviewCollapsed,
+  setBulkRowsFromListing,
+  setSuppressPreviewReveal,
   setBulkAttachmentPickerLoading,
   clearBulkAttachmentPicker,
   renderBulkAttachmentPicker,
@@ -63,20 +67,19 @@ import {
   getListingHasSelection,
   scrollBulkToFirstSelected,
   bulkAttachmentGroups,
-  bulkAttachmentSelectAll,
   bulkIncludeAttachments,
   jiraToSparkSyncBtn,
   setJiraToSparkVisible,
   setJiraSyncFlowActive,
   markAttachmentsSynced,
-  updateAttachmentIncludeSyncState,
-  updateBulkGroupSizeLabels,
-  updateBulkIncludeSyncState,
   setJiraFilterActive,
   isJiraFilterActive,
   isBulkBusy,
+  setBulkSessionChecking,
   showLoginButton,
   hideLoginButtons,
+  showBulkSystemLoginButtons,
+  hideBulkSystemLoginButtons,
 } from "./components/ui.js";
 import { debounce } from "./components/util.js";
 import {
@@ -113,6 +116,7 @@ import {
   runListingImport,
   runJiraFilterImport,
   loadJiraFilterRows,
+  refreshJiraFilterSelection,
   requestAbort,
 } from "./components/bulk-import.js";
 import { requestUploadCancel } from "./components/attachments.js";
@@ -121,10 +125,13 @@ import {
   detectJiraPageInTab,
   syncJiraUpdates,
   getSyncAttachmentItems,
+  fetchSparkAttachmentItemsInOrigin,
+  parseSourceUrl,
 } from "./components/jira-to-spark.js";
 import {
   getSyncOctaneAttachmentItems,
   syncOctaneUpdates,
+  checkOctaneAccess,
 } from "./components/jira-to-octane.js";
 
 const debouncedSaveSettings = debounce(saveSettings, 300);
@@ -601,33 +608,34 @@ includeAttachmentsInput.addEventListener("change", async () => {
   }
 });
 
-attachmentSelectAll.addEventListener("change", () => {
-  const boxes = attachmentGroups.querySelectorAll(
-    ".attachment-item input[type='checkbox']",
-  );
-  boxes.forEach((box) => {
-    if (box.disabled) return;
-    box.checked = attachmentSelectAll.checked;
-  });
-  state.attachmentSelection = attachmentSelectAll.checked
-    ? Array.from(boxes)
-        .filter((box) => !box.disabled)
-        .map((box) => box.dataset.name)
-    : [];
-  updateAttachmentIncludeSyncState();
-});
-
 bulkIncludeAttachments.addEventListener("change", async () => {
   if (isJiraFilterActive()) {
     if (!getBulkIncludeAttachments()) {
       clearBulkAttachmentPicker();
       setBulkPreviewCollapsed(false);
+      hideBulkSystemLoginButtons();
       return;
     }
 
-    if (!state.bulkRows.length) {
-      await loadJiraFilterRows();
+    setSuppressPreviewReveal(true);
+    try {
+      if (!state.bulkRows.length) {
+        await loadJiraFilterRows();
+        if (!state.bulkRows.length) {
+          bulkIncludeAttachments.checked = false;
+          bulkIncludeAttachments.indeterminate = false;
+          clearBulkAttachmentPicker();
+          return;
+        }
+      }
+
+      await refreshJiraFilterSelection();
+    } finally {
+      setSuppressPreviewReveal(false);
     }
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)),
+    );
 
     const seenRows = new Set();
     const selectedRows = state.bulkRows.filter((r) => {
@@ -643,6 +651,84 @@ bulkIncludeAttachments.addEventListener("change", async () => {
       setStatus("Select the issues on the Jira page to sync.", "error");
       clearBulkAttachmentPicker();
       return;
+    }
+
+    hideBulkSystemLoginButtons();
+    const neededSystems = new Map();
+    for (const row of selectedRows) {
+      const sourceUrl = String(row.sourceUrl || "").trim();
+      if (!sourceUrl) continue;
+      const system = /entityType=work_item|shared_spaces|#\/entity-navigation/.test(
+        sourceUrl,
+      )
+        ? "Octane"
+        : "Spark";
+      if (!neededSystems.has(system)) neededSystems.set(system, sourceUrl);
+    }
+
+    if (neededSystems.size) {
+      const checkToggle = bulkIncludeAttachments.closest(".attach-toggle");
+      bulkIncludeAttachments.checked = false;
+      bulkIncludeAttachments.indeterminate = true;
+      bulkIncludeAttachments.disabled = true;
+      checkToggle?.classList.add("checking");
+      setBulkSessionChecking(true);
+      setStatus(
+        `Checking ${Array.from(neededSystems.keys()).join(" and ")} access…`,
+        "loading",
+      );
+      const missing = [];
+      for (const [system, sourceUrl] of neededSystems) {
+        let loginRequired = false;
+        if (system === "Spark") {
+          try {
+            const { sparkOrigin, sysId } = parseSourceUrl(sourceUrl);
+            const res = await fetchSparkAttachmentItemsInOrigin({
+              sparkOrigin,
+              sysId,
+            });
+            loginRequired = !res || Boolean(res.loginRequired);
+          } catch {
+            loginRequired = true;
+          }
+        } else {
+          try {
+            const octaneOrigin = new URL(sourceUrl).origin;
+            const res = await checkOctaneAccess({
+              octaneOrigin,
+              sourceUrl,
+            });
+            loginRequired = !res || Boolean(res.loginRequired);
+          } catch {
+            loginRequired = true;
+          }
+        }
+        if (loginRequired) missing.push({ system, url: sourceUrl });
+      }
+      bulkIncludeAttachments.disabled = false;
+      checkToggle?.classList.remove("checking");
+      setBulkSessionChecking(false);
+      if (missing.length) {
+        bulkIncludeAttachments.checked = false;
+        bulkIncludeAttachments.indeterminate = false;
+        showBulkSystemLoginButtons(
+          missing.map(({ system, url }) => ({
+            system,
+            url,
+            label: `Log in to ${system}`,
+          })),
+        );
+        const names = missing.map((m) => m.system).join(" and ");
+        setStatus(
+          `Log in to ${names} to sync attachments with the selected Jira issues.`,
+          "error",
+        );
+        smoothScrollToBottom();
+        return;
+      }
+      bulkIncludeAttachments.checked = true;
+      bulkIncludeAttachments.indeterminate = false;
+      hideBulkSystemLoginButtons();
     }
 
     setBulkPreviewCollapsed(true);
@@ -755,8 +841,13 @@ bulkIncludeAttachments.addEventListener("change", async () => {
           ? `${skipped} file(s) over 25 MB skipped — add them from the Jira UI.`
           : "",
       );
+      const allRowsFullySynced =
+        state.bulkRows.length > 0 &&
+        state.bulkRows.every((r) => r.checkbox.disabled);
       setStatus(
-        "Select which attachments to sync between Jira and the linked Octane/Spark tickets.",
+        allRowsFullySynced
+          ? "All set - Sync selected Jira listing"
+          : "Select which attachments to sync between Jira and the linked Octane/Spark tickets.",
         "info",
       );
       smoothScrollToBottom();
@@ -979,33 +1070,6 @@ function fullySyncedIds(groups, syncedMap) {
   );
 }
 
-bulkAttachmentSelectAll.addEventListener("change", () => {
-  const checked = bulkAttachmentSelectAll.checked;
-  const sel = {};
-  bulkAttachmentGroups
-    .querySelectorAll(".attachment-item input[type='checkbox']")
-    .forEach((box) => {
-      if (box.disabled) return;
-      box.checked = checked;
-      if (!sel[box.dataset.ticket]) sel[box.dataset.ticket] = [];
-      if (checked) sel[box.dataset.ticket].push(box.dataset.name);
-    });
-  state.bulkAttachmentSelection = sel;
-
-  bulkAttachmentGroups
-    .querySelectorAll(".attachment-group-check")
-    .forEach((groupCheck) => {
-      const boxes = groupCheck.closest(".attachment-group").querySelectorAll(
-        ".attachment-item:not(.attachment-item-synced) input[type='checkbox']",
-      );
-      let checkedCount = 0;
-      for (const box of boxes) if (box.checked) checkedCount++;
-      groupCheck.checked = checkedCount > 0 && checkedCount === boxes.length;
-    });
-  updateBulkGroupSizeLabels();
-  updateBulkIncludeSyncState();
-});
-
 abortImportBtn.addEventListener("click", () => {
   requestAbort();
   abortImportBtn.disabled = true;
@@ -1079,9 +1143,12 @@ async function applyDetectedState() {
   let onSyncFlow = false;
   if (jiraPage?.type === "filter") {
     setJiraFilterActive(true);
-    try {
-      await loadJiraFilterRows();
-    } catch {}
+    setBulkRowsFromListing(true);
+    if (!state.bulkRows.length) {
+      previewSection.style.display = "none";
+      previewBody.innerHTML = "";
+      syncListingControls();
+    }
   } else if (jiraPage?.type === "ticket") {
     setJiraFilterActive(false);
     try {
@@ -1178,3 +1245,4 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   }
 });
 window.addEventListener("focus", debouncedDetectState);
+document.addEventListener("bulkflow-cleared", applyDetectedState);

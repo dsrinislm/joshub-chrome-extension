@@ -7,5 +7,7 @@ export {
 export {
   syncSparkAttachmentsInOrigin,
   getSyncAttachmentItems,
+  fetchSparkAttachmentItemsInOrigin,
+  parseSourceUrl,
 } from "./spark-attachments.js";
 export { syncJiraUpdates } from "./spark-sync.js";

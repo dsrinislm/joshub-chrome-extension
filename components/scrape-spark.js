@@ -41,6 +41,7 @@ export async function fetchSparkCommentsInPage(ids) {
 
   const fetchIncident = async (id) => {
     const entries = [];
+    let loginWall = false;
     try {
       const response = await fetch(
         `${location.origin}/api/now/table/sys_journal_field?sysparm_query=element_id=${encodeURIComponent(id)}^ORDERBYsys_created_on&sysparm_fields=element,value,sys_created_by,sys_created_on,sys_id&sysparm_display_value=true&sysparm_limit=1000`,
@@ -65,6 +66,8 @@ export async function fetchSparkCommentsInPage(ids) {
             text,
           });
         }
+      } else if (response.status === 401 || response.status === 403) {
+        loginWall = true;
       }
     } catch {}
 
@@ -221,7 +224,7 @@ export async function fetchSparkCommentsInPage(ids) {
     };
     entries.sort((a, b) => parseDate(a.createdAt) - parseDate(b.createdAt));
 
-    return entries;
+    return { entries, loginRequired: loginWall && entries.length === 0 };
   };
 
   const groups = new Array(idList.length);
@@ -229,9 +232,11 @@ export async function fetchSparkCommentsInPage(ids) {
   const worker = async () => {
     while (next < idList.length) {
       const index = next++;
+      const res = await fetchIncident(idList[index]);
       groups[index] = {
         id: String(idList[index]),
-        comments: await fetchIncident(idList[index]),
+        comments: res.entries,
+        ...(res.loginRequired ? { loginRequired: true } : {}),
       };
     }
   };

@@ -21,6 +21,7 @@ import {
   unlockBulkImport,
   lockBulkImport,
   setBulkRowsFromListing,
+  isExcelFlowActive,
   updateSelectionCount,
   syncListingControls,
   frameBulkView,
@@ -33,6 +34,7 @@ import {
   updateBulkMediaFiles,
   setBulkMediaProgressDone,
   hideBulkMediaProgress,
+  setJiraFilterDropCount,
 } from "./ui.js";
 import { getJiraContext } from "./validation.js";
 import { saveSettings, saveProjectHistory } from "./storage.js";
@@ -769,6 +771,16 @@ function syncBitsForRow(result, flowSite) {
   }
   if (sparkToJira?.added > 0) {
     bits.push(`${sparkToJira.added} ${flowSite} comment(s) → Jira`);
+  } else if (sparkToJira?.error) {
+    bits.push(
+      `${flowSite}→Jira comment sync failed: ${escapeHtml(sparkToJira.error)}`,
+    );
+  } else if (sparkToJira?.total > 0) {
+    bits.push(`${flowSite} comments up to date in Jira`);
+  } else if (sparkToJira && !sparkToJira.error) {
+    bits.push(
+      `${flowSite} comments not found — open the ${flowSite} incident in a tab and retry`,
+    );
   }
   if (attachments?.uploaded > 0) {
     bits.push(`${attachments.uploaded} attachment(s) → Jira`);
@@ -785,11 +797,23 @@ function syncBitsForRow(result, flowSite) {
   return bits;
 }
 
-let jiraFilterLoadedForUrl = null;
+let jiraFilterLoadPromise = null;
 
 export async function loadJiraFilterRows() {
   if (isBulkBusy()) return false;
+  if (isExcelFlowActive()) return true;
 
+  if (!jiraFilterLoadPromise) {
+    jiraFilterLoadPromise = loadJiraFilterRowsImpl();
+  }
+  try {
+    return await jiraFilterLoadPromise;
+  } finally {
+    jiraFilterLoadPromise = null;
+  }
+}
+
+async function loadJiraFilterRowsImpl() {
   const tab = await getCurrentTab();
   const params = jiraFilterParamsFromUrl(tab?.url || "");
   if (!params) {
@@ -797,14 +821,13 @@ export async function loadJiraFilterRows() {
     return false;
   }
 
-  const currentUrl = tab?.url || "";
-  if (jiraFilterLoadedForUrl === currentUrl && state.bulkRows.length) {
-    return true;
-  }
-  jiraFilterLoadedForUrl = currentUrl;
-
   setBulkRowsFromListing(true);
   setStatus("Reading the issues selected on the Jira page…", "loading");
+
+  previewBody.innerHTML = "";
+  state.bulkRows = [];
+  setJiraFilterDropCount(0);
+  selectAllLabel?.classList.remove("hidden");
 
   const items = await scrapeJiraFilterSelectionInTab();
   const seenKeys = new Set();
@@ -817,6 +840,7 @@ export async function loadJiraFilterRows() {
   }
   if (!uniqueItems.length) {
     setBulkRowsFromListing(false);
+    previewSection.style.display = "none";
     syncListingControls();
     setStatus("Select the issues on the Jira page to sync.", "info");
     return false;
@@ -828,14 +852,16 @@ export async function loadJiraFilterRows() {
   } catch {}
   if (!jiraOrigin) {
     setBulkRowsFromListing(false);
+    previewSection.style.display = "none";
     syncListingControls();
     setStatus("Couldn't determine the Jira site from this page.", "error");
     return false;
   }
 
-  previewBody.innerHTML = "";
-  state.bulkRows = [];
-  selectAllLabel?.classList.remove("hidden");
+  if (isExcelFlowActive()) {
+    setBulkRowsFromListing(false);
+    return false;
+  }
 
   const records = await Promise.all(
     uniqueItems.map(async (item) => {
@@ -851,11 +877,30 @@ export async function loadJiraFilterRows() {
       };
     }),
   );
-  records.forEach((record) => addBulkRow(record, "Jira"));
-
-  previewSection.style.display = "none";
+  const syncable = records.filter((r) => r.sourceUrl);
+  const dropped = records.length - syncable.length;
+  setJiraFilterDropCount(dropped);
+  syncable.forEach((record) => addBulkRow(record, "Jira"));
 
   syncListingControls();
+
+  if (!syncable.length) {
+    setBulkRowsFromListing(false);
+    previewSection.style.display = "none";
+    setStatus(
+      dropped
+        ? "No selected tickets are linked to Spark/Octane — select tickets with a source ticket URL."
+        : "Select the issues on the Jira page to sync.",
+      "error",
+    );
+    return false;
+  }
+  if (dropped) {
+    setStatus(
+      `${dropped} ticket(s) dropped — not linked to Spark/Octane.`,
+      "info",
+    );
+  }
 
   frameBulkView();
 
@@ -864,10 +909,62 @@ export async function loadJiraFilterRows() {
   return true;
 }
 
+export async function refreshJiraFilterSelection() {
+  const tab = await getCurrentTab();
+  if (!jiraFilterParamsFromUrl(tab?.url || "")) return;
+
+  const items = await scrapeJiraFilterSelectionInTab();
+  const selectedKeys = new Set(
+    items.map((i) => String(i.key || "").toUpperCase()).filter(Boolean),
+  );
+
+  for (const row of state.bulkRows) {
+    row.checkbox.checked = selectedKeys.has(
+      String(row.idText || "").toUpperCase(),
+    );
+  }
+
+  let jiraOrigin = "";
+  try {
+    jiraOrigin = new URL(tab?.url || "").origin;
+  } catch {}
+
+  const byKey = new Set(
+    state.bulkRows.map((r) => String(r.idText || "").toUpperCase()),
+  );
+  for (const item of items) {
+    const k = String(item.key || "").toUpperCase();
+    if (!k || byKey.has(k)) continue;
+    try {
+      const fetched = await getJiraIssueInTab(item.key);
+      const fields = fetched.issue?.fields || {};
+      const sourceUrl = extractSourceUrl(fields.description) || "";
+      if (!sourceUrl) continue;
+      addBulkRow(
+        {
+          rowIndex: item.key,
+          idText: item.key,
+          name: String(fields.summary || item.summary || ""),
+          description: adfToText(fields.description),
+          sourceUrl,
+          idLink: jiraOrigin ? `${jiraOrigin}/browse/${item.key}` : "",
+        },
+        "Jira",
+      );
+      byKey.add(k);
+    } catch {}
+  }
+
+  updateSelectionCount();
+  syncListingControls();
+}
+
 export async function runJiraFilterImport() {
   if (!(await loadJiraFilterRows())) return;
 
   previewSection.style.display = "block";
+
+  frameBulkView();
 
   setBulkRowsFromListing(true);
 
@@ -952,6 +1049,10 @@ export async function runJiraFilterImport() {
             includeAttachments && bulkAttachmentSelection
               ? bulkAttachmentSelection[String(row.idText)] || undefined
               : undefined;
+          const mediaProgress = {
+            kind: "bulk",
+            label: row.name ? `${row.idText} · ${row.name}` : row.idText,
+          };
           const result =
             flowSite === "Octane"
               ? await syncOctaneUpdates({
@@ -959,19 +1060,20 @@ export async function runJiraFilterImport() {
                   issueKey: row.idText,
                   includeAttachments,
                   selectedAttachments: selectedNames,
-                  selectionJiraToSourceOnly: true,
+                  mediaProgress,
                 })
               : await syncJiraUpdates({
                   jiraOrigin,
                   issueKey: row.idText,
                   includeAttachments,
                   selectedAttachments: selectedNames,
-                  selectionJiraToSourceOnly: true,
+                  mediaProgress,
                 });
 
           const bits = syncBitsForRow(result, flowSite);
           const failed =
             result.report?.failed > 0 ||
+            result.sparkToJira?.error ||
             result.attachments?.failed > 0 ||
             result.attachmentsToSpark?.failed > 0;
           const url = `${jiraOrigin}/browse/${row.idText}`;

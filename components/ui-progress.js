@@ -57,44 +57,100 @@ function refreshBulkMediaRowVisibility() {
 export function setupBulkMediaProgress(labels) {
   if (!bulkMediaProgressList) return;
   bulkMediaProgressList.innerHTML = "";
-  labels.forEach((label) => {
-    const row = document.createElement("div");
-    row.className = "bulk-media-row";
-    row.dataset.state = "pending";
-
-    const head = document.createElement("div");
-    head.className = "bulk-media-row-head";
-
-    const labelEl = document.createElement("span");
-    labelEl.className = "bulk-media-row-label";
-    labelEl.textContent = label;
-
-    const pctEl = document.createElement("span");
-    pctEl.className = "bulk-media-row-pct";
-    pctEl.textContent = "0%";
-
-    head.append(labelEl, pctEl);
-
-    const track = document.createElement("div");
-    track.className = "bulk-media-row-track";
-    const bar = document.createElement("div");
-    bar.className = "bulk-media-row-bar";
-    track.appendChild(bar);
-
-    const files = document.createElement("div");
-    files.className = "bulk-media-row-files";
-    files.textContent = "0 files";
-
-    row.append(head, track, files);
-    bulkMediaProgressList.appendChild(row);
-  });
-  if (bulkMediaProgress) bulkMediaProgress.style.display = labels.length ? "block" : "none";
-  if (bulkMediaProgressCount) {
-    bulkMediaProgressCount.textContent = labels.length
-      ? `${labels.length} ticket(s) with media`
-      : "";
+  labels.forEach((label) => appendBulkMediaProgressRow(label));
+  if (!labels.length) {
+    if (bulkMediaProgress) bulkMediaProgress.style.display = "none";
+    if (bulkMediaProgressCount) bulkMediaProgressCount.textContent = "";
   }
   refreshBulkMediaRowVisibility();
+}
+
+export function appendBulkMediaProgressRow(label) {
+  if (!bulkMediaProgressList) return -1;
+  const row = document.createElement("div");
+  row.className = "bulk-media-row";
+  row.dataset.state = "pending";
+
+  const head = document.createElement("div");
+  head.className = "bulk-media-row-head";
+
+  const labelEl = document.createElement("span");
+  labelEl.className = "bulk-media-row-label";
+  labelEl.textContent = label;
+
+  const pctEl = document.createElement("span");
+  pctEl.className = "bulk-media-row-pct";
+  pctEl.textContent = "0%";
+
+  head.append(labelEl, pctEl);
+
+  const track = document.createElement("div");
+  track.className = "bulk-media-row-track";
+  const bar = document.createElement("div");
+  bar.className = "bulk-media-row-bar";
+  track.appendChild(bar);
+
+  const files = document.createElement("div");
+  files.className = "bulk-media-row-files";
+  files.textContent = "0 files";
+
+  row.append(head, track, files);
+  bulkMediaProgressList.appendChild(row);
+
+  if (bulkMediaProgress) bulkMediaProgress.style.display = "block";
+  if (bulkMediaProgressCount) {
+    const count = bulkMediaProgressList.children.length;
+    bulkMediaProgressCount.textContent = `${count} ticket(s) with media`;
+  }
+  refreshBulkMediaRowVisibility();
+  return bulkMediaProgressList.children.length - 1;
+}
+
+export function createAttachmentProgressAdapter(config) {
+  if (!config || config.kind !== "bulk") {
+    return {
+      start: () => {
+        startSyncAttachmentProgress();
+        syncAbortBtn.disabled = false;
+      },
+      addFile: (item) => addSyncAttachmentProgressRow(item),
+      setProgress: (index, loaded, total) =>
+        setSyncAttachmentProgress(index, loaded, total),
+      setState: (index, state, message) =>
+        setSyncAttachmentState(index, state, message),
+      done: () => {},
+    };
+  }
+  let row = -1;
+  let totalFiles = 0;
+  let doneFiles = 0;
+  return {
+    start: () => {
+      if (row === -1) {
+        row = appendBulkMediaProgressRow(config.label || "attachment");
+      }
+      totalFiles = 0;
+      doneFiles = 0;
+      startBulkMediaProgress(row);
+    },
+    addFile: () => {
+      totalFiles++;
+      updateBulkMediaFiles(row, doneFiles, totalFiles);
+      return totalFiles - 1;
+    },
+    setProgress: (_index, loaded, total) => {
+      updateBulkMediaProgress(row, loaded, total);
+    },
+    setState: (_index, state) => {
+      if (state === "done" || state === "failed" || state === "skipped") {
+        doneFiles++;
+        updateBulkMediaFiles(row, doneFiles, totalFiles);
+      }
+    },
+    done: () => {
+      if (row !== -1) setBulkMediaProgressDone(row);
+    },
+  };
 }
 
 export function startBulkMediaProgress(rowIndex) {

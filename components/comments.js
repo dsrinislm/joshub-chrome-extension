@@ -70,16 +70,34 @@ async function syncCommentsToJira({
     const errors = [];
     for (const entry of entries) {
       const text = String(entry.text || "").trim();
-      if (skipPrefix.test(text)) continue;
+      if (!text) continue;
+      const prefixed = skipPrefix.test(text);
+      let jiraBody = "";
+      if (prefixed) {
+        jiraBody = text
+          .replace(skipPrefix, "")
+          .replace(/^[^\n]*\n+/, "")
+          .trim();
+        if (!jiraBody || knownBodies.has(jiraBody)) continue;
+      }
       if (knownBodies.has(text)) continue;
       const entryId = entry.id || entry.sysId;
-      if (sourceId && entryId && (await isFromJira(sourceId, entryId))) {
+      if (
+        !prefixed &&
+        sourceId &&
+        entryId &&
+        (await isFromJira(sourceId, entryId))
+      ) {
         continue;
       }
       const header = headerFor(entry);
-      if (known.has(header)) continue;
+      if (!prefixed && known.has(header)) continue;
       try {
-        await addJiraComment(jiraOrigin, issueKey, bodyFor(entry));
+        await addJiraComment(
+          jiraOrigin,
+          issueKey,
+          prefixed ? jiraBody : bodyFor(entry),
+        );
         known.add(header);
         added++;
       } catch (error) {

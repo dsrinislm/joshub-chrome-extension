@@ -11,9 +11,10 @@ import {
   bulkAttachmentPicker,
   bulkAttachmentPickerTitle,
   bulkAttachmentSection,
-  bulkAttachmentSelectAll,
   bulkIncludeAttachments,
   bulkView,
+  bulkSparkLoginBtn,
+  bulkOctaneLoginBtn,
   clearFileBtn,
   dropzone,
   dropzoneHint,
@@ -52,6 +53,7 @@ import {
   expandAttachmentPicker,
   itemSizeText,
   setStatus,
+  hideLoginButtons,
 } from "./ui-single.js";
 import { hideBulkMediaProgress } from "./ui-progress.js";
 
@@ -127,7 +129,6 @@ export function setBulkAttachmentPickerLoading() {
   bulkAttachmentGroups.innerHTML = "";
   setBulkAttachmentNote("");
   bulkPickerHasNoAttachments = false;
-  updateBulkAttachmentSelectAll();
   updateBulkIncludeSyncState();
   setBulkAttachmentSyncProgress(true);
   state.bulkAttachmentSelection = null;
@@ -138,7 +139,6 @@ export function clearBulkAttachmentPicker() {
   if (bulkAttachmentGroups) bulkAttachmentGroups.innerHTML = "";
   setBulkAttachmentNote("");
   setBulkAttachmentSyncProgress(false);
-  if (bulkAttachmentSelectAll) bulkAttachmentSelectAll.checked = true;
   if (bulkIncludeAttachments) {
     bulkIncludeAttachments.indeterminate = false;
   }
@@ -173,6 +173,7 @@ export function renderBulkAttachmentPicker(groups, labels = {}, syncedMap = {}) 
     const selectable = files.filter(
       (f) => f.source === "jira" || !synced.has(f.name),
     );
+    const fullySynced = selectable.length === 0;
     state.bulkAttachmentSelection[ticketId] = selectable.map((f) => f.name);
 
     const block = document.createElement("div");
@@ -201,7 +202,6 @@ export function renderBulkAttachmentPicker(groups, labels = {}, syncedMap = {}) 
         });
       updateGroupCheck(ticketId);
       updateGroupSizeLabel(ticketId);
-      updateBulkAttachmentSelectAll();
       updateBulkIncludeSyncState();
     });
 
@@ -210,12 +210,14 @@ export function renderBulkAttachmentPicker(groups, labels = {}, syncedMap = {}) 
       labels[ticketId] || group.id,
       files,
       selectable.map((f) => f.name),
+      fullySynced,
     );
     title.append(groupCheckbox, titleText);
     block.appendChild(title);
 
     block._files = files;
     block._titleText = titleText;
+    block._fullySynced = fullySynced;
     block.dataset.title = labels[ticketId] || String(group.id);
     block.dataset.count = String(files.length);
     block.dataset.size = formatBytes(
@@ -244,7 +246,6 @@ export function renderBulkAttachmentPicker(groups, labels = {}, syncedMap = {}) 
           : sel.filter((n) => n !== item.name);
         updateGroupCheck(ticketId);
         updateGroupSizeLabel(ticketId);
-        updateBulkAttachmentSelectAll();
         updateBulkIncludeSyncState();
       });
 
@@ -276,35 +277,7 @@ export function renderBulkAttachmentPicker(groups, labels = {}, syncedMap = {}) 
     bulkPickerHasNoAttachments = true;
   }
 
-  updateBulkAttachmentSelectAll();
   updateBulkIncludeSyncState();
-}
-
-function updateBulkAttachmentSelectAll() {
-  if (!bulkAttachmentSelectAll) return;
-  const allBoxes = bulkAttachmentGroups.querySelectorAll(
-    ".attachment-item input[type='checkbox']",
-  );
-
-  const boxes = bulkAttachmentGroups.querySelectorAll(
-    ".attachment-item:not(.attachment-item-synced) input[type='checkbox']",
-  );
-
-  const toggle = bulkAttachmentSelectAll.closest(".attachment-picker-toggle");
-  toggle?.classList.toggle("hidden", boxes.length === 0);
-  let checked = 0;
-  for (const box of boxes) if (box.checked) checked++;
-
-  if (boxes.length === 0) {
-
-    bulkAttachmentSelectAll.checked = allBoxes.length > 0;
-    bulkAttachmentSelectAll.disabled = allBoxes.length > 0;
-    bulkAttachmentSelectAll.indeterminate = false;
-    return;
-  }
-  bulkAttachmentSelectAll.disabled = false;
-  bulkAttachmentSelectAll.checked = checked > 0 && checked === boxes.length;
-  bulkAttachmentSelectAll.indeterminate = checked > 0 && checked < boxes.length;
 }
 
 let bulkPickerHasNoAttachments = false;
@@ -350,7 +323,7 @@ function selectedBytesOf(files, names) {
   );
 }
 
-function buildGroupTitleText(label, files, selectedNames) {
+function buildGroupTitleText(label, files, selectedNames, fullySynced) {
   const totalBytes = files.reduce(
     (sum, f) => sum + (Number(f.sizeBytes) || 0),
     0,
@@ -359,7 +332,13 @@ function buildGroupTitleText(label, files, selectedNames) {
   if (!totalSize || totalSize === "0 B") {
     return `${label} (${files.length})`;
   }
+  if (fullySynced) {
+    return `${label} (${files.length}) · ${totalSize}`;
+  }
   const selBytes = selectedBytesOf(files, selectedNames);
+  if (selBytes <= 0) {
+    return `${label} (${files.length})`;
+  }
   const selSize = formatBytes(selBytes);
   if (selBytes >= totalBytes) {
     return `${label} (${files.length}) · ${totalSize}`;
@@ -378,6 +357,7 @@ function updateGroupSizeLabel(ticketId) {
     block.dataset.title,
     files,
     state.bulkAttachmentSelection?.[ticketId],
+    block._fullySynced,
   );
 }
 
@@ -446,7 +426,6 @@ export function markBulkAttachmentsSynced(uploadedMap) {
     updateGroupCheck(ticketId);
     refreshBulkGroupTitle(ticketId);
   }
-  updateBulkAttachmentSelectAll();
   updateBulkIncludeSyncState();
 }
 
@@ -497,7 +476,18 @@ export function unlockBulkImport() {
 
 let bulkBusy = false;
 
+let bulkSessionChecking = false;
+
 let bulkRowsFromListing = false;
+
+export function setBulkSessionChecking(checking) {
+  bulkSessionChecking = Boolean(checking);
+  updateListingControls();
+}
+
+export function isBulkSessionChecking() {
+  return bulkSessionChecking;
+}
 
 export function setBulkRowsFromListing(fromListing) {
   bulkRowsFromListing = Boolean(fromListing);
@@ -515,6 +505,7 @@ export function setBulkBusy(isBusy) {
   listingImportBtn.disabled = isBusy;
   listingImportBtn.dataset.loading = isBusy ? "true" : "false";
   if (isBusy) {
+    listingImportBtn.style.display = "none";
     collapseAttachmentPickers();
   }
 
@@ -594,18 +585,34 @@ export function updateBulkStatusMessage() {
   setStatus(
     jiraFilterActive
       ? !state.bulkRows.length
-        ? "Select the issues on the Jira page to sync"
-        : getBulkHasCheckedRows() ||
-            !state.bulkRows.some((r) => !r.checkbox.disabled)
-          ? "All set - Sync selected Jira listing"
+        ? jiraFilterDropCount
+          ? "No selected tickets are linked to Spark/Octane."
           : "Select the issues on the Jira page to sync"
+        : jiraFilterDropCount
+          ? `${jiraFilterDropCount} ticket(s) dropped — not linked to Spark/Octane.`
+          : getBulkHasCheckedRows() ||
+              !state.bulkRows.some((r) => !r.checkbox.disabled)
+            ? "All set - Sync selected Jira listing"
+            : "Select the issues on the Jira page to sync"
       : jiraConfigured
         ? excelFlowActive || !activeListingSite || !listingHasSelection
           ? "Upload Octane or Spark report"
           : "All set - Sync selected listing to continue"
         : "Configure Jira details and create a ticket.",
-    "info",
+    jiraFilterActive && jiraFilterDropCount && !state.bulkRows.length
+      ? "error"
+      : "info",
   );
+}
+
+let jiraFilterDropCount = 0;
+
+export function setJiraFilterDropCount(count) {
+  jiraFilterDropCount = Math.max(0, Number(count) || 0);
+}
+
+export function getJiraFilterDropCount() {
+  return jiraFilterDropCount;
 }
 
 let activeListingSite = null;
@@ -711,12 +718,12 @@ function listingSyncDoneState() {
 function updateListingControls() {
   const show =
     !excelFlowActive &&
-    (jiraFilterActive
-      ? state.bulkRows.some((r) => r.checkbox.checked)
-      : Boolean(activeListingSite) && listingHasSelection);
+    (jiraFilterActive || (Boolean(activeListingSite) && listingHasSelection));
   setBulkAttachmentSectionVisible(show);
   listingImportBtn.style.display =
-    show && !listingSyncDoneState() ? "block" : "none";
+    show && !bulkBusy && !bulkSessionChecking && !listingSyncDoneState()
+      ? "block"
+      : "none";
   if (show && !listingSyncDoneState()) {
     listingImportLabel.textContent = jiraFilterActive
       ? "Sync selected Jira listing"
@@ -728,6 +735,32 @@ export function applyListingState(listing, selectedCount) {
   setActiveListingSite(listing);
   setListingHasSelection(selectedCount > 0);
   updateClearAffordance(listing, selectedCount);
+}
+
+function bulkSystemLoginButton(system) {
+  return system === "Spark" ? bulkSparkLoginBtn : bulkOctaneLoginBtn;
+}
+
+export function showBulkSystemLoginButtons(required) {
+  let any = false;
+  for (const { system, url, label } of required) {
+    const btn = bulkSystemLoginButton(system);
+    if (!btn) continue;
+    const labelEl = btn.querySelector(".btn-label");
+    if (labelEl) labelEl.textContent = label;
+    btn.style.display = "block";
+    btn.onclick = () => {
+      chrome.tabs.create({ url });
+    };
+    any = true;
+  }
+  if (any) bulkView.classList.add("login-visible");
+}
+
+export function hideBulkSystemLoginButtons() {
+  if (bulkSparkLoginBtn) bulkSparkLoginBtn.style.display = "none";
+  if (bulkOctaneLoginBtn) bulkOctaneLoginBtn.style.display = "none";
+  bulkView.classList.remove("login-visible");
 }
 
 const DROPZONE_ICON_EXCEL =
@@ -742,6 +775,9 @@ export function setDropzoneLoaded() {
 
   setExcelFlowActive(true);
   setBulkRowsFromListing(false);
+
+  hideLoginButtons();
+  hideBulkSystemLoginButtons();
 
   updateClearAffordance(activeListingSite, listingHasSelection ? 1 : 0);
 }
@@ -775,20 +811,22 @@ export function clearFileUpload() {
   resetDropzone();
   setBulkRowsFromListing(false);
   updateSelectionCount();
+  document.dispatchEvent(new CustomEvent("bulkflow-cleared"));
 }
 
 clearFileBtn?.addEventListener("click", clearFileUpload);
 
 export function updateClearAffordance(listing, selectedCount) {
   if (!isExcelFlowActive()) {
+    clearFileBtn.hidden = true;
     setClearHintVisible(false);
     return;
   }
+  clearFileBtn.hidden = false;
   setClearHintVisible(Boolean(listing) && selectedCount > 0);
 }
 
 function setClearHintVisible(visible) {
-  clearFileBtn.hidden = !visible;
   const hint = dropzoneHint.querySelector(".dropzone-clear-hint");
   if (!hint) return;
   hint.style.display = visible ? "" : "none";
@@ -842,12 +880,14 @@ export function updateSelectionCount() {
         (r.statusEl.textContent || "").includes("attachments up to date"),
       );
       setStatus(
-        bulkRowsFromListing
-          ? allAlreadySynced
-            ? "Selected attachments are already synced — nothing to sync."
-            : "Bulk import done! Select rows on the listing page to sync more"
-          : "Bulk import done! try different report",
-        "success",
+        jiraFilterActive
+          ? "All set - Sync selected Jira listing"
+          : bulkRowsFromListing
+            ? allAlreadySynced
+              ? "Selected attachments are already synced — nothing to sync."
+              : "Bulk import done! Select rows on the listing page to sync more"
+            : "Bulk import done! try different report",
+        jiraFilterActive ? "info" : "success",
       );
     } else if (selected > 0) {
 
@@ -1089,11 +1129,19 @@ function buildBulkRow(record, site = "Octane") {
   return { tr, row };
 }
 
+let suppressPreviewReveal = false;
+
+export function setSuppressPreviewReveal(suppress) {
+  suppressPreviewReveal = Boolean(suppress);
+}
+
 export function addBulkRow(record, site = "Octane") {
   const { tr, row } = buildBulkRow(record, site);
   previewBody.appendChild(tr);
-  previewSection.style.display = "block";
-  setBulkPreviewCollapsed(false);
+  if (!suppressPreviewReveal) {
+    previewSection.style.display = "block";
+    setBulkPreviewCollapsed(false);
+  }
   selectAllLabel?.classList.toggle("hidden", bulkBusy);
   updatePreviewTitle();
   updateSelectionCount();

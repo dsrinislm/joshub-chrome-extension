@@ -14,19 +14,39 @@ import { formatBytes, sleep } from "./util.js";
 
 export async function fetchSparkEntriesInOrigin({ sparkOrigin, sysId, tab }) {
   const run = async (activeTab) => {
+    let tabUrl = "";
+    try {
+      tabUrl = (await chrome.tabs.get(activeTab.id))?.url || "";
+    } catch {}
+    if (tabUrl && !tabUrl.startsWith(sparkOrigin)) {
+      return {
+        entries: [],
+        error: `Spark tab is not on ${sparkOrigin} — open the incident there and retry.`,
+      };
+    }
     const results = await chrome.scripting.executeScript({
       target: { tabId: activeTab.id, allFrames: true },
       func: fetchSparkCommentsInPage,
       args: [[sysId]],
       world: "MAIN",
     });
-    const outs = (results || [])
+    const groups = (results || [])
       .map((r) => r.result)
       .filter((g) => Array.isArray(g) && g.length > 0);
-    return outs.sort(
-      (a, b) =>
-        (b[0]?.comments?.length || 0) - (a[0]?.comments?.length || 0),
-    )[0]?.[0]?.comments || [];
+    const loginRequired = groups.some((g) =>
+      g.some((x) => x && x.loginRequired),
+    );
+    const entries =
+      groups.sort(
+        (a, b) =>
+          (b[0]?.comments?.length || 0) - (a[0]?.comments?.length || 0),
+      )[0]?.[0]?.comments || [];
+    return {
+      entries,
+      error: loginRequired && !entries.length
+        ? `Spark session expired or API access denied on ${sparkOrigin} — log in and retry.`
+        : "",
+    };
   };
   if (tab) return run(tab);
   return useSparkTab({ sparkOrigin, sysId, requireTicket: false }, run);
@@ -54,7 +74,7 @@ export async function fetchSparkAttachmentsInOrigin({ sparkOrigin, sysId, tab })
   return useSparkTab({ sparkOrigin, sysId, requireTicket: false }, run);
 }
 
-async function fetchSparkAttachmentItemsInOrigin({ sparkOrigin, sysId, tab }) {
+export async function fetchSparkAttachmentItemsInOrigin({ sparkOrigin, sysId, tab }) {
   const run = async (activeTab) => {
     let tabUrl = "";
     try {

@@ -10,11 +10,7 @@ import {
   dataUrlSize,
 } from "./attachments.js";
 import {
-  startSyncAttachmentProgress,
-  addSyncAttachmentProgressRow,
-  setSyncAttachmentProgress,
-  setSyncAttachmentState,
-  syncAbortBtn,
+  createAttachmentProgressAdapter,
 } from "./ui.js";
 import {
   useSparkTab,
@@ -34,6 +30,7 @@ export async function syncJiraUpdates({
   selectedAttachments,
   selectionJiraToSourceOnly = false,
   cachedJiraData,
+  mediaProgress,
 }) {
   let issue;
   let jiraItems = [];
@@ -72,7 +69,8 @@ export async function syncJiraUpdates({
 
   return useSparkTab({ sparkOrigin, sysId, requireTicket: false }, async (tab) => {
     const jiraComments = await listJiraCommentsDetailed(jiraOrigin, issueKey);
-    const sparkEntries = await fetchSparkEntriesInOrigin({ sparkOrigin, sysId, tab });
+    const { entries: sparkEntries, error: sparkScrapeError } =
+      await fetchSparkEntriesInOrigin({ sparkOrigin, sysId, tab });
     const sparkToJira = await syncSparkComments(
       jiraOrigin,
       issueKey,
@@ -80,6 +78,9 @@ export async function syncJiraUpdates({
       sysId,
       jiraComments.map((c) => c.body),
     );
+    if (sparkScrapeError && !sparkToJira.error) {
+      sparkToJira.error = sparkScrapeError;
+    }
 
     let attachments = { uploaded: 0, failed: 0, skipped: 0 };
     let attachmentsToSpark = {
@@ -91,6 +92,7 @@ export async function syncJiraUpdates({
     };
     if (includeAttachments) {
       try {
+        const progress = createAttachmentProgressAdapter(mediaProgress);
         const jiraNames = new Map(
           jiraItems.map((item) => [item.name, Number(item.size) || null]),
         );
@@ -99,18 +101,19 @@ export async function syncJiraUpdates({
           ? images
           : selected.size
             ? images.filter((img) => selected.has(img.name))
-            : images;
+            : Array.isArray(selectedAttachments)
+              ? []
+              : images;
         let progressReady = false;
         const ensureProgress = () => {
           if (progressReady) return;
           progressReady = true;
-          startSyncAttachmentProgress();
-          syncAbortBtn.disabled = false;
+          progress.start();
         };
         if (imagesToSync.length) {
           ensureProgress();
           imagesToSync.forEach((img) => {
-            addSyncAttachmentProgressRow({
+            progress.addFile({
               label: img.name,
               size: img.sizeBytes ?? dataUrlSize(img.dataUrl),
               hint: "Uploading to Jira…",
@@ -124,18 +127,18 @@ export async function syncJiraUpdates({
             undefined,
             jiraNames,
             (index, loaded, total) =>
-              setSyncAttachmentProgress(index, loaded, total),
+              progress.setProgress(index, loaded, total),
           );
           const skippedSet = new Set(attachments.skippedNames || []);
           const failedSet = new Set(attachments.failedNames || []);
           imagesToSync.forEach((img, i) => {
             const name = String(img.name || "");
             if (skippedSet.has(name)) {
-              setSyncAttachmentState(i, "skipped", "Already on Jira");
+              progress.setState(i, "skipped", "Already on Jira");
             } else if (failedSet.has(name)) {
-              setSyncAttachmentState(i, "failed", "Upload to Jira failed");
+              progress.setState(i, "failed", "Upload to Jira failed");
             } else {
-              setSyncAttachmentState(i, "done", "Synced to Jira");
+              progress.setState(i, "done", "Synced to Jira");
             }
           });
         }
@@ -143,12 +146,14 @@ export async function syncJiraUpdates({
           ? jiraItems.filter((item) => selected.has(item.name))
           : selected.size
             ? jiraItems.filter((item) => selected.has(item.name))
-            : jiraItems;
+            : Array.isArray(selectedAttachments)
+              ? []
+              : jiraItems;
         if (jiraToSync.length) {
           ensureProgress();
           const offset = imagesToSync.length;
           jiraToSync.forEach((item) => {
-            addSyncAttachmentProgressRow({
+            progress.addFile({
               label: item.name,
               size: Number(item.size) || 0,
               hint: "Queued…",
@@ -162,11 +167,12 @@ export async function syncJiraUpdates({
             tab,
             knownSparkNames,
             onFileProgress: (index, loaded, total) =>
-              setSyncAttachmentProgress(offset + index, loaded, total),
+              progress.setProgress(offset + index, loaded, total),
             onFileState: (index, state, message) =>
-              setSyncAttachmentState(offset + index, state, message),
+              progress.setState(offset + index, state, message),
           });
         }
+        progress.done();
       } catch {}
     }
 

@@ -23,13 +23,7 @@ import {
   dataUrlSize,
   imageUploadFilename,
 } from "./attachments.js";
-import {
-  startSyncAttachmentProgress,
-  addSyncAttachmentProgressRow,
-  setSyncAttachmentProgress,
-  setSyncAttachmentState,
-  syncAbortBtn,
-} from "./ui.js";
+import { createAttachmentProgressAdapter } from "./ui.js";
 import {
   attachmentByteSize,
   MAX_ATTACHMENT_UPLOAD_BYTES,
@@ -79,6 +73,51 @@ function parseOctaneSourceUrl(sourceUrl) {
     workItemId: idMatch[1],
     apiBase: `${origin}/api/shared_spaces/${sharedSpace}/workspaces/${workspace}`,
   };
+}
+
+function checkOctaneAccessInPage(apiBase) {
+  const href = location.href || "";
+  const loginPath = /\/login|\/sso|\/signin/i.test(href);
+  const passwordInput = document.querySelector('input[type="password"]');
+  if (passwordInput || loginPath) return { loginRequired: true };
+  return fetch(apiBase, { credentials: "include" })
+    .then((response) => {
+      if (response.status === 401 || response.status === 403) {
+        return { loginRequired: true };
+      }
+      if (response.redirected && /login|sso|signin/i.test(response.url)) {
+        return { loginRequired: true };
+      }
+      const contentType = String(
+        response.headers?.get?.("content-type") || "",
+      ).toLowerCase();
+      if (/text\/html|text\/plain/.test(contentType)) {
+        return { loginRequired: true };
+      }
+      return { loginRequired: false };
+    })
+    .catch(() => ({ loginRequired: true }));
+}
+
+export async function checkOctaneAccess({ octaneOrigin, sourceUrl }) {
+  const ctx = parseOctaneSourceUrl(sourceUrl);
+  const run = async (tab) => {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      func: checkOctaneAccessInPage,
+      args: [ctx.apiBase],
+      world: "ISOLATED",
+    });
+    const outs = (results || [])
+      .map((r) => r.result)
+      .filter((r) => r && typeof r === "object");
+    return {
+      loginRequired: outs.length
+        ? outs.some((r) => r.loginRequired)
+        : true,
+    };
+  };
+  return useOctaneTab({ octaneOrigin, sourceUrl }, run);
 }
 
 function formatDate(value) {
@@ -473,6 +512,7 @@ export async function syncOctaneUpdates({
   selectedAttachments,
   selectionJiraToSourceOnly = false,
   cachedJiraData,
+  mediaProgress,
 }) {
   let issue;
   let jiraItems = [];
@@ -554,6 +594,7 @@ export async function syncOctaneUpdates({
       };
       if (includeAttachments) {
         try {
+          const progress = createAttachmentProgressAdapter(mediaProgress);
           const jiraNames = new Map(
             jiraItems.map((item) => [item.name, Number(item.size) || null]),
           );
@@ -574,18 +615,19 @@ export async function syncOctaneUpdates({
             ? jiraItems.filter((item) => selected.has(item.name))
             : selected.size
               ? jiraItems.filter((item) => selected.has(item.name))
-              : jiraItems;
+              : Array.isArray(selectedAttachments)
+                ? []
+                : jiraItems;
           let progressReady = false;
           const ensureProgress = () => {
             if (progressReady) return;
             progressReady = true;
-            startSyncAttachmentProgress();
-            syncAbortBtn.disabled = false;
+            progress.start();
           };
           if (sourceImages.length) {
             ensureProgress();
             sourceImages.forEach((img) => {
-              addSyncAttachmentProgressRow({
+              progress.addFile({
                 label: img.name || imageUploadFilename(img),
                 size: img.sizeBytes ?? dataUrlSize(img.dataUrl),
                 hint: "Uploading to Jira…",
@@ -599,18 +641,18 @@ export async function syncOctaneUpdates({
               undefined,
               jiraNames,
               (index, loaded, total) =>
-                setSyncAttachmentProgress(index, loaded, total),
+                progress.setProgress(index, loaded, total),
             );
             const skippedSet = new Set(attachments.skippedNames || []);
             const failedSet = new Set(attachments.failedNames || []);
             sourceImages.forEach((img, i) => {
               const name = String(img.name || imageUploadFilename(img));
               if (skippedSet.has(name)) {
-                setSyncAttachmentState(i, "skipped", "Already on Jira");
+                progress.setState(i, "skipped", "Already on Jira");
               } else if (failedSet.has(name)) {
-                setSyncAttachmentState(i, "failed", "Upload to Jira failed");
+                progress.setState(i, "failed", "Upload to Jira failed");
               } else {
-                setSyncAttachmentState(i, "done", "Synced to Jira");
+                progress.setState(i, "done", "Synced to Jira");
               }
             });
           }
@@ -619,7 +661,7 @@ export async function syncOctaneUpdates({
             ensureProgress();
             const offset = sourceImages.length;
             jiraToSync.forEach((item) => {
-              addSyncAttachmentProgressRow({
+              progress.addFile({
                 label: item.name,
                 size: Number(item.size) || 0,
                 hint: "Queued…",
@@ -631,11 +673,12 @@ export async function syncOctaneUpdates({
               files: jiraToSync,
               tab,
               onFileProgress: (index, loaded, total) =>
-                setSyncAttachmentProgress(offset + index, loaded, total),
+                progress.setProgress(offset + index, loaded, total),
               onFileState: (index, state, message) =>
-                setSyncAttachmentState(offset + index, state, message),
+                progress.setState(offset + index, state, message),
             });
           }
+          progress.done();
         } catch {}
       }
 
