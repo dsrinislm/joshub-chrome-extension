@@ -223,15 +223,17 @@ export function fetchListingDetailsInPage(ids, site, options = {}) {
 
         const dom = readRowDom(String(id));
         if (dom) {
-          return {
-            id: String(id),
-            number: dom.number || "",
-            name: dom.shortDescription || dom.number || String(id),
-            description: escapePlain(dom.description),
-            html: escapePlain(dom.description),
-            images: [],
-            url: itemUrl(id),
-          };
+        return {
+          id: String(id),
+          number: dom.number || "",
+          name: dom.shortDescription || dom.number || String(id),
+          description: escapePlain(dom.description),
+          html: escapePlain(dom.description),
+          images: [],
+          url: itemUrl(id),
+          creationTime: "",
+          phase: "",
+        };
         }
         throw new Error(
           `${apiName} ${response ? response.status : "network"} — row not in listing DOM`,
@@ -269,6 +271,8 @@ export function fetchListingDetailsInPage(ids, site, options = {}) {
         html,
         images,
         url: itemUrl(id),
+        creationTime: "",
+        phase: "",
       };
     };
   } else {
@@ -291,7 +295,7 @@ export function fetchListingDetailsInPage(ids, site, options = {}) {
 
     fetchItem = async (id) => {
       const response = await fetchWithRetry(
-        `${apiBase}/work_items/${id}?fields=id,name,description`,
+        `${apiBase}/work_items/${id}?fields=id,name,description,creation_time,phase`,
         { credentials: "include" },
       );
       if (!response.ok) {
@@ -368,6 +372,8 @@ export function fetchListingDetailsInPage(ids, site, options = {}) {
         html,
         images,
         url: itemUrl(id),
+        creationTime: data.creation_time || "",
+        phase: data.phase?.name || "",
       };
     };
   }
@@ -391,6 +397,8 @@ export function fetchListingDetailsInPage(ids, site, options = {}) {
             images: [],
             url: itemUrl(id),
             error: err.message || `${apiName} fetch failed`,
+            creationTime: "",
+            phase: "",
           };
         }
       }

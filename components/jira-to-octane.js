@@ -3,10 +3,12 @@ import {
   fetchJiraAttachmentDataUrl,
   getJiraIssue,
   getJiraIssueWithAttachments,
+  updateJiraIssueLabels,
 } from "./api.js";
 import {
   getCurrentTab,
   fetchOctaneCommentsInPage,
+  fetchOctanePhaseInPage,
   postOctaneCommentsInPage,
   uploadOctaneAttachmentInPage,
   listListingAttachmentsInTab,
@@ -45,7 +47,7 @@ function waitForTabComplete(tabId, timeoutMs = 20000) {
   });
 }
 
-function parseOctaneSourceUrl(sourceUrl) {
+export function parseOctaneSourceUrl(sourceUrl) {
   let origin;
   try {
     origin = new URL(sourceUrl).origin;
@@ -127,7 +129,7 @@ function formatDate(value) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-async function executeInOctaneTab(fn, args, tab) {
+export async function executeInOctaneTab(fn, args, tab) {
   const target = tab || (await getCurrentTab());
   if (!target?.id) throw new Error("No Octane tab found.");
   const results = await chrome.scripting.executeScript({
@@ -141,7 +143,7 @@ async function executeInOctaneTab(fn, args, tab) {
     .filter((r) => r !== undefined && r !== null);
 }
 
-async function useOctaneTab({ octaneOrigin, sourceUrl }, fn) {
+export async function useOctaneTab({ octaneOrigin, sourceUrl }, fn) {
   const tabs = await chrome.tabs
     .query({ url: `${octaneOrigin}/*` })
     .catch(() => []);
@@ -690,6 +692,23 @@ export async function syncOctaneUpdates({
         tab,
       });
 
+      let labelUpdated = false;
+      try {
+        const phase = await executeInOctaneTab(
+          fetchOctanePhaseInPage,
+          [ctx.workItemId],
+          tab,
+        ).then((outs) => outs.find((r) => typeof r === "string") || "");
+        if (phase) {
+          await updateJiraIssueLabels(
+            jiraOrigin,
+            issueKey,
+            `Octane_${phase}`,
+          );
+          labelUpdated = true;
+        }
+      } catch {}
+
       return {
         report,
         sparkToJira: octaneToJira,
@@ -698,6 +717,7 @@ export async function syncOctaneUpdates({
         sourceUrl,
         octaneOrigin: ctx.octaneOrigin,
         issueKey,
+        labelUpdated,
       };
     },
   );

@@ -49,7 +49,7 @@ export async function scrapeInPage(site, options = {}) {
     let response;
     try {
       response = await fetch(
-        `${apiBase}/work_items/${itemId}?fields=id,name,description`,
+        `${apiBase}/work_items/${itemId}?fields=id,name,description,creation_time,phase`,
         { credentials: "include" },
       );
     } catch {
@@ -163,6 +163,7 @@ export async function scrapeInPage(site, options = {}) {
     }
 
     const itemIdText = String(data.id ?? itemId);
+    const phaseName = data.phase?.name || "";
     return {
       title: `${site.name.toUpperCase()} | ${itemIdText} | ${String(data.name).replace(/\s+/g, " ").trim()}`,
       id: itemIdText,
@@ -171,6 +172,8 @@ export async function scrapeInPage(site, options = {}) {
       html,
       text,
       images,
+      creationTime: data.creation_time || "",
+      phase: phaseName,
     };
   };
 
@@ -184,6 +187,8 @@ export async function scrapeInPage(site, options = {}) {
       url: location.href,
       html: "",
       images: [],
+      creationTime: "",
+      phase: "",
     };
   }
 
@@ -359,6 +364,8 @@ export async function scrapeInPage(site, options = {}) {
       html,
       text: plainText(record.description),
       images,
+      creationTime: "",
+      phase: "",
     };
   }
 
@@ -449,6 +456,8 @@ export async function scrapeInPage(site, options = {}) {
       html,
       text,
       images,
+      creationTime: "",
+      phase: "",
     };
   }
 
@@ -467,6 +476,8 @@ export async function scrapeInPage(site, options = {}) {
       html: "",
       text: "",
       images: [],
+      creationTime: "",
+      phase: "",
     };
   }
 }

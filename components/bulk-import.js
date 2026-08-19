@@ -44,12 +44,14 @@ import {
   fetchListingDetailsInTab,
   fetchSparkCommentsInTab,
   fetchOctaneCommentsInTab,
+  fetchOctanePhaseInPage,
   getCurrentTab,
 } from "./scrape.js";
 import { syncSourceComments } from "./comments.js";
 import {
   findExistingJiraIssueFor,
   createJiraIssue,
+  updateJiraIssueLabels,
   getJiraIssueWithAttachments,
   getJiraIssueInTab,
 } from "./api.js";
@@ -63,6 +65,7 @@ import {
   syncJiraCommentsToOctane,
   syncOctaneAttachmentsInOrigin,
   syncOctaneUpdates,
+  executeInOctaneTab,
 } from "./jira-to-octane.js";
 import {
   syncSparkAttachmentsInOrigin,
@@ -571,6 +574,24 @@ export async function runListingImport(site) {
                 statusHtml = `${statusHtml} — ${back.report.failed} Jira comment(s) failed to sync back to Octane`;
               }
             } catch {}
+            try {
+              const octaneIdMatch =
+                /entityType=work_item&id=(\d+)/.exec(detail.url || row.sourceUrl || "") ||
+                /[?&]id=(\d+)/.exec((detail.url || row.sourceUrl || "").split("#")[1] || "");
+              if (octaneIdMatch) {
+                const phase = await executeInOctaneTab(
+                  fetchOctanePhaseInPage,
+                  [octaneIdMatch[1]],
+                ).then((outs) => outs.find((r) => typeof r === "string") || "");
+                if (phase) {
+                  await updateJiraIssueLabels(
+                    jiraOrigin,
+                    existing.issue.key,
+                    `Octane_${phase}`,
+                  );
+                }
+              }
+            } catch {}
           } else if (flowSite === "Spark") {
             if (getBulkIncludeAttachments()) {
               try {
@@ -659,11 +680,19 @@ export async function runListingImport(site) {
               ],
             };
 
+            const startDate = detail.creationTime
+              ? String(detail.creationTime).slice(0, 10)
+              : undefined;
+            const labels = detail.phase
+              ? [`Octane_${detail.phase}`]
+              : undefined;
+
             const issue = await createJiraIssue(
               jiraOrigin,
               projectKey,
               row.title,
               issueDescription,
+              { startDate, labels },
             );
 
             let attachFailed = 0;

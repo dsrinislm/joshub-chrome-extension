@@ -37,4 +37,5 @@ export {
   fetchOctaneCommentsInTab,
   postOctaneCommentsInPage,
   uploadOctaneAttachmentInPage,
+  fetchOctanePhaseInPage,
 } from "./scrape-octane.js";

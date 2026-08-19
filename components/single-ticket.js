@@ -24,6 +24,7 @@ import {
   detectSiteInTab,
   fetchSparkCommentsInTab,
   fetchOctaneCommentsInTab,
+  fetchOctanePhaseInPage,
   getCurrentTab,
 } from "./scrape.js";
 import {
@@ -34,12 +35,15 @@ import {
 import {
   syncJiraCommentsToOctane,
   syncOctaneAttachmentsInOrigin,
+  parseOctaneSourceUrl,
+  useOctaneTab,
 } from "./jira-to-octane.js";
 import {
   isJiraLoggedIn,
   validateProject,
   findExistingJiraIssueFor,
   createJiraIssue,
+  updateJiraIssueLabels,
   getJiraIssueWithAttachments,
   listJiraCommentsDetailed,
 } from "./api.js";
@@ -512,6 +516,35 @@ export async function createTicket() {
         } catch {}
       }
 
+      if (site === "Octane" && pageData.url) {
+        try {
+          const ctx = parseOctaneSourceUrl(pageData.url);
+          const phase = await useOctaneTab(
+            { octaneOrigin: ctx.octaneOrigin, sourceUrl: pageData.url },
+            async (tab) => {
+              const results = await chrome.scripting.executeScript({
+                target: { tabId: tab.id, allFrames: true },
+                func: fetchOctanePhaseInPage,
+                args: [ctx.workItemId],
+                world: "ISOLATED",
+              });
+              return (
+                results
+                  .map((r) => r.result)
+                  .find((r) => typeof r === "string") || ""
+              );
+            },
+          );
+          if (phase) {
+            await updateJiraIssueLabels(
+              jiraOrigin,
+              existing.issue.key,
+              `Octane_${phase}`,
+            );
+          }
+        } catch {}
+      }
+
       setStatus(`${finalStatus}${backSyncText}`, finalStatusType);
       renderTicketCard(existing.issue.key, issueUrl);
       saveProjectHistory(projectKey);
@@ -545,11 +578,19 @@ export async function createTicket() {
 
     setStatus("Creating Jira ticket...", "loading");
 
+    const startDate = capturedData.creationTime
+      ? String(capturedData.creationTime).slice(0, 10)
+      : undefined;
+    const labels = capturedData.phase
+      ? [`Octane_${capturedData.phase}`]
+      : undefined;
+
     const issue = await createJiraIssue(
       jiraOrigin,
       projectKey,
       finalSummary,
       issueDescription,
+      { startDate, labels },
     );
 
     let attachReport = { failed: 0 };

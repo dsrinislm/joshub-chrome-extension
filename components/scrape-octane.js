@@ -307,3 +307,26 @@ export async function uploadOctaneAttachmentInPage({ workItemId, name, dataUrl }
     };
   }
 }
+
+export async function fetchOctanePhaseInPage(workItemId) {
+  const octaneApiContext = () => {
+    const contextMatch = /[?&]p=([^&#/]+\/[^&#]+)/.exec(location.search || "");
+    if (!contextMatch) return null;
+    const [sharedSpace, workspace] = contextMatch[1].split("/");
+    if (!sharedSpace || !workspace) return null;
+    return `${location.origin}/api/shared_spaces/${sharedSpace}/workspaces/${workspace}`;
+  };
+  const apiBase = octaneApiContext();
+  if (!apiBase || !/^\d+$/.test(String(workItemId))) return "";
+  try {
+    const response = await fetch(
+      `${apiBase}/work_items/${workItemId}?fields=phase`,
+      { credentials: "include" },
+    );
+    if (!response.ok) return "";
+    const data = await response.json();
+    return data?.phase?.name || "";
+  } catch {
+    return "";
+  }
+}

@@ -353,7 +353,7 @@ async function throwAuthOrSession(jiraBaseUrl, loginPath, messageIfSessionValid)
   throw new Error("Jira session expired. Please login again.");
 }
 
-async function createJiraIssue(jiraBaseUrl, projectKey, summary, description) {
+async function createJiraIssue(jiraBaseUrl, projectKey, summary, description, { startDate, labels } = {}) {
   const payload = {
     fields: {
       project: { key: projectKey },
@@ -362,6 +362,13 @@ async function createJiraIssue(jiraBaseUrl, projectKey, summary, description) {
       description,
     },
   };
+
+  if (startDate) {
+    payload.fields.startdate = startDate;
+  }
+  if (Array.isArray(labels) && labels.length) {
+    payload.fields.labels = labels;
+  }
 
   const response = await jiraFetch(
     jiraBaseUrl,
@@ -686,6 +693,29 @@ async function getJiraIssueWithAttachments(jiraBaseUrl, issueKey) {
   return { issue: data, attachments: mapAttachmentItems(data?.fields?.attachment) };
 }
 
+async function updateJiraIssueLabels(jiraBaseUrl, issueKey, newLabel) {
+  if (!issueKey || !newLabel) return;
+  const issue = await fetchJiraIssue(jiraBaseUrl, issueKey, "labels");
+  const current = Array.isArray(issue?.fields?.labels)
+    ? issue.fields.labels
+    : [];
+  const filtered = current.filter((l) => !/^Octane_/.test(l));
+  const updated = [...filtered, newLabel];
+  const body = JSON.stringify({ fields: { labels: updated } });
+  const response = await jiraFetch(
+    jiraBaseUrl,
+    `/rest/api/3/issue/${encodeURIComponent(issueKey)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body,
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`Label update failed (status ${response.status}).`);
+  }
+}
+
 async function addJiraComment(jiraBaseUrl, issueKey, body) {
   const payload =
     body && typeof body === "object" && body.type === "doc"
@@ -737,6 +767,7 @@ export {
   findExistingJiraIssueByUrl,
   findExistingJiraIssueFor,
   createJiraIssue,
+  updateJiraIssueLabels,
   uploadJiraAttachment,
   updateJiraIssueDescription,
   listIssueAttachments,
