@@ -353,21 +353,16 @@ async function throwAuthOrSession(jiraBaseUrl, loginPath, messageIfSessionValid)
   throw new Error("Jira session expired. Please login again.");
 }
 
-async function createJiraIssue(jiraBaseUrl, projectKey, summary, description, { startDate, labels } = {}) {
-  const payload = {
-    fields: {
-      project: { key: projectKey },
-      summary,
-      issuetype: { name: "Bug" },
-      description,
-    },
+async function createJiraIssue(jiraBaseUrl, projectKey, summary, description, { labels } = {}) {
+  const fields = {
+    project: { key: projectKey },
+    summary,
+    issuetype: { name: "Bug" },
+    description,
   };
 
-  if (startDate) {
-    payload.fields.startdate = startDate;
-  }
   if (Array.isArray(labels) && labels.length) {
-    payload.fields.labels = labels;
+    fields.labels = labels;
   }
 
   const response = await jiraFetch(
@@ -379,9 +374,8 @@ async function createJiraIssue(jiraBaseUrl, projectKey, summary, description, { 
         "Content-Type": "application/json",
         "X-Atlassian-Token": "no-check",
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ fields }),
     },
-
     { retryStatus: false },
   );
 

@@ -231,7 +231,6 @@ export function fetchListingDetailsInPage(ids, site, options = {}) {
           html: escapePlain(dom.description),
           images: [],
           url: itemUrl(id),
-          creationTime: "",
           phase: "",
         };
         }
@@ -271,7 +270,6 @@ export function fetchListingDetailsInPage(ids, site, options = {}) {
         html,
         images,
         url: itemUrl(id),
-        creationTime: "",
         phase: "",
       };
     };
@@ -295,7 +293,7 @@ export function fetchListingDetailsInPage(ids, site, options = {}) {
 
     fetchItem = async (id) => {
       const response = await fetchWithRetry(
-        `${apiBase}/work_items/${id}?fields=id,name,description,creation_time,phase`,
+        `${apiBase}/work_items/${id}?fields=id,name,description,phase`,
         { credentials: "include" },
       );
       if (!response.ok) {
@@ -372,7 +370,6 @@ export function fetchListingDetailsInPage(ids, site, options = {}) {
         html,
         images,
         url: itemUrl(id),
-        creationTime: data.creation_time || "",
         phase: data.phase?.name || "",
       };
     };
@@ -397,7 +394,6 @@ export function fetchListingDetailsInPage(ids, site, options = {}) {
             images: [],
             url: itemUrl(id),
             error: err.message || `${apiName} fetch failed`,
-            creationTime: "",
             phase: "",
           };
         }

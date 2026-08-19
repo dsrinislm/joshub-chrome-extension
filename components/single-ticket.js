@@ -573,14 +573,14 @@ export async function createTicket() {
     const issueDescription = {
       version: 1,
       type: "doc",
-      content: [...sourceUrlBlock(capturedData.url), ...bodyAdf.content],
+      content: [
+        ...sourceUrlBlock(capturedData.url),
+        ...bodyAdf.content,
+      ],
     };
 
     setStatus("Creating Jira ticket...", "loading");
 
-    const startDate = capturedData.creationTime
-      ? String(capturedData.creationTime).slice(0, 10)
-      : undefined;
     const labels = capturedData.phase
       ? [`Octane_${capturedData.phase}`]
       : undefined;
@@ -590,7 +590,7 @@ export async function createTicket() {
       projectKey,
       finalSummary,
       issueDescription,
-      { startDate, labels },
+      { labels },
     );
 
     let attachReport = { failed: 0 };

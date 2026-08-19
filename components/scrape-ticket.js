@@ -49,7 +49,7 @@ export async function scrapeInPage(site, options = {}) {
     let response;
     try {
       response = await fetch(
-        `${apiBase}/work_items/${itemId}?fields=id,name,description,creation_time,phase`,
+        `${apiBase}/work_items/${itemId}?fields=id,name,description,phase`,
         { credentials: "include" },
       );
     } catch {
@@ -172,7 +172,6 @@ export async function scrapeInPage(site, options = {}) {
       html,
       text,
       images,
-      creationTime: data.creation_time || "",
       phase: phaseName,
     };
   };
@@ -187,7 +186,6 @@ export async function scrapeInPage(site, options = {}) {
       url: location.href,
       html: "",
       images: [],
-      creationTime: "",
       phase: "",
     };
   }
@@ -364,7 +362,6 @@ export async function scrapeInPage(site, options = {}) {
       html,
       text: plainText(record.description),
       images,
-      creationTime: "",
       phase: "",
     };
   }
@@ -456,7 +453,6 @@ export async function scrapeInPage(site, options = {}) {
       html,
       text,
       images,
-      creationTime: "",
       phase: "",
     };
   }
@@ -476,7 +472,6 @@ export async function scrapeInPage(site, options = {}) {
       html: "",
       text: "",
       images: [],
-      creationTime: "",
       phase: "",
     };
   }

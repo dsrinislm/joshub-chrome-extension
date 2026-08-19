@@ -680,9 +680,6 @@ export async function runListingImport(site) {
               ],
             };
 
-            const startDate = detail.creationTime
-              ? String(detail.creationTime).slice(0, 10)
-              : undefined;
             const labels = detail.phase
               ? [`Octane_${detail.phase}`]
               : undefined;
@@ -692,7 +689,7 @@ export async function runListingImport(site) {
               projectKey,
               row.title,
               issueDescription,
-              { startDate, labels },
+              { labels },
             );
 
             let attachFailed = 0;
