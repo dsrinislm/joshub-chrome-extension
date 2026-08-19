@@ -11,13 +11,13 @@ export function fetchListingDetailsInPage(ids, site, options = {}) {
     const plain = !/<[a-zA-Z][^>]*>/.test(String(html));
     if (plain) {
 
-      const escaped = String(html).replace(/[&<>"']/g, (c) => ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;",
-      })[c]);
+      const escaped = String(html)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;")
+        .replace(/\n/g, "<br>");
       return { html: escaped, images };
     }
 

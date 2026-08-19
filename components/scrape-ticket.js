@@ -68,13 +68,13 @@ export async function scrapeInPage(site, options = {}) {
     if (plain) {
 
       text = raw;
-      html = raw.replace(/[&<>"']/g, (c) => ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;",
-      })[c]);
+      html = raw
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;")
+        .replace(/\n/g, "<br>");
     } else {
 
       const doc = new DOMParser().parseFromString(raw, "text/html");

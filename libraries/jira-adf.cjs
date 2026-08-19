@@ -186,6 +186,17 @@
       case "br":
         return textNode("\n");
 
+      case "div":
+      case "form":
+      case "section":
+      case "article":
+      case "header":
+      case "footer":
+      case "main":
+      case "nav":
+      case "aside":
+        return parseChildren(node);
+
       default:
         return paragraph(node);
     }
@@ -202,6 +213,14 @@
       ) {
         const img = image(child);
         if (img) blocks.push(img);
+        return;
+      }
+
+      if (
+        child.nodeType === Node.ELEMENT_NODE &&
+        child.tagName.toLowerCase() === "p"
+      ) {
+        blocks.push(...parseNode(child));
         return;
       }
 
