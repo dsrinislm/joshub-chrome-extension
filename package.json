@@ -1,0 +1,18 @@
+{
+  "name": "joshub-browser-extension",
+  "version": "1.0.0",
+  "private": true,
+  "author": "Srinivasan Dhanapal",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "lint": "eslint components popup.js",
+    "lint:fix": "eslint components popup.js --fix",
+    "lint:strip": "eslint components popup.js -c eslint.strip.config.js --fix"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "eslint": "^10.8.0",
+    "html-minifier-terser": "^7.2.0"
+  }
+}
