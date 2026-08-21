@@ -1,6 +1,6 @@
-# Tri Connect Hub — Issue Synchronizer
+# JosHub — Issue Synchronizer
 
-**Tri Connect Hub** is a Chrome extension that connects your QA/issue-tracking systems with Jira, so you can stop copy-pasting ticket details and start working.
+**JosHub** is a browser extension that connects your QA/issue-tracking systems with Jira, so you can stop copy-pasting ticket details and start working.
 
 It links **Micro Focus Octane** and **ServiceNow (Spark)** to **Atlassian Jira** with one-click workflows:
 
