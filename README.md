@@ -11,6 +11,37 @@ It links **Micro Focus Octane** and **ServiceNow (Spark)** to **Atlassian Jira**
 
 ---
 
+## Browser compatibility
+
+JosHub works across all common modern browsers. Two builds are shipped from the same codebase:
+
+| Build | Manifest | Browsers |
+|---|---|---|
+| `dist/` | Manifest V3 | Chrome, Edge, Brave, Opera, Arc, Vivaldi, and any other Chromium-based browser |
+| `manifest.firefox.json` | Manifest V2 | Firefox 109+ |
+
+All Chromium-based browsers load the same unpacked build — no changes needed per browser. Firefox uses its own manifest because it still expects Manifest V2, but the extension code itself is identical.
+
+### Install in Chrome / Edge / Brave / Opera / Arc
+
+1. Open the extensions page:
+   - Chrome / Brave / Arc / Opera: `chrome://extensions`
+   - Edge: `edge://extensions`
+2. Enable **Developer mode**.
+3. Click **Load unpacked** and select this folder's `dist/` directory.
+4. Pin the JosHub icon to your toolbar.
+
+### Install in Firefox
+
+1. Open `about:debugging#/runtime/this-firefox`.
+2. Click **Load Temporary Add-on…**.
+3. Select `manifest.firefox.json` from this folder.
+4. Note: Firefox loads it as a *temporary* add-on — it is removed when Firefox restarts unless the extension is signed and distributed through Mozilla Add-ons.
+
+> After installing, continue with the setup steps below — they are identical in every browser.
+
+---
+
 ## What it lets you do
 
 ### 1. Create a Jira ticket from a single QA ticket
@@ -36,11 +67,11 @@ Images, videos, and files attached to a QA ticket can be carried over to Jira, i
 
 ## Getting started
 
-1. **Install the extension** in Chrome (via `chrome://extensions` → *Load unpacked*, selecting this folder).
+1. **Install the extension** in your browser (see [Browser compatibility](#browser-compatibility) above for per-browser steps).
 2. **Open the extension** from the toolbar.
 3. **Enter your Jira base URL** — for example `https://yourcompany.atlassian.net` (the extension can also detect it automatically when you open a Jira page).
 4. **Enter your Jira project key** — the short project code, e.g. `QA`, `TES`, or `PROJ`.
-5. Sign in to Jira in Chrome when prompted.
+5. Sign in to Jira in your browser when prompted.
 
 That's it — you're ready to create and sync tickets.
 
@@ -89,4 +120,4 @@ This is an internal productivity tool. For questions or issues, reach out to you
 
 ## Author
 
-Srinivasan Dhanapal <dsrinislm@gmail.com>
+Srinivasan Dhanapal
